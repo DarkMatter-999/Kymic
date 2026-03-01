@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { DefaultChatTransport } from 'ai';
 
 import './App.css';
+import { ReasoningBlock } from './components/ReasoningBlock';
 
 function App() {
   const { messages, sendMessage, status, error } = useChat({
@@ -88,10 +89,15 @@ function App() {
           const isUser = message.role === 'user';
           const textContent = message.parts
             .filter((p) => p.type === 'text')
-            .map((p) => (p.type === 'text' ? p.text : ''))
+            .map((p) => p.text || '')
             .join('');
 
-          if (!textContent) return null;
+          const reasoningContent = message.parts
+            .filter((p) => p.type?.includes('reasoning'))
+            .map((p) => p.delta || p.text || p.reasoning || '')
+            .join('');
+
+          if (!textContent && !reasoningContent) return null;
 
           return (
             <div
@@ -102,7 +108,7 @@ function App() {
             >
               {/* Avatar */}
               <div
-                className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full ${
+                className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full mt-1 ${
                   isUser
                     ? 'bg-zinc-100 text-black'
                     : 'bg-zinc-900 border border-zinc-800 text-zinc-100'
@@ -115,19 +121,31 @@ function App() {
                 )}
               </div>
 
-              {/* Bubble */}
+              {/* Bubble Container */}
               <div
-                className={`px-4 py-3 rounded-2xl text-sm leading-relaxed max-w-[80%] ${
-                  isUser
-                    ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm'
-                    : 'bg-transparent text-zinc-300 rounded-tl-sm'
-                }`}
+                className={`flex flex-col gap-2 max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}
               >
-                {isUser ? (
-                  <p className="whitespace-pre-wrap">{textContent}</p>
-                ) : (
-                  <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
-                    <ReactMarkdown>{textContent}</ReactMarkdown>
+                {/* Reasoning Accordion */}
+                {!isUser && reasoningContent && (
+                  <ReasoningBlock content={reasoningContent} />
+                )}
+
+                {/* Main Text Bubble */}
+                {textContent && (
+                  <div
+                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed w-full ${
+                      isUser
+                        ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm'
+                        : 'bg-transparent text-zinc-300 rounded-tl-sm'
+                    }`}
+                  >
+                    {isUser ? (
+                      <p className="whitespace-pre-wrap">{textContent}</p>
+                    ) : (
+                      <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
+                        <ReactMarkdown>{textContent}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -140,7 +158,7 @@ function App() {
           (messages.length === 0 ||
             messages[messages.length - 1]?.role !== 'assistant') && (
             <div className="flex items-start gap-3 max-w-3xl mx-auto">
-              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-100">
+              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-100 mt-1">
                 <Bot size={15} color="currentColor" />
               </div>
               <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-transparent">
