@@ -47,10 +47,13 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-black text-zinc-100">
+    <div className="flex flex-col h-screen bg-black text-zinc-100 relative app-container">
+      {/* Grain Overlay */}
+      <div className="grain-overlay" />
+
       {/* Header */}
-      <header className="flex items-center gap-3 px-6 py-4 border-b border-zinc-900 bg-black shrink-0">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800">
+      <header className="flex items-center gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
+        <div className="flex items-center justify-center w-9 h-9 rounded-lg avatar-bot">
           <Bot size={20} className="text-zinc-100" />
         </div>
         <div>
@@ -68,10 +71,10 @@ function App() {
       </header>
 
       {/* Messages */}
-      <main className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+      <main className="flex-1 overflow-y-auto px-4 py-6 space-y-6 main-content relative z-10">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800">
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-center empty-state">
+            <div className="flex items-center justify-center w-16 h-16 rounded-2xl empty-state-icon">
               <Bot size={32} className="text-zinc-400" />
             </div>
             <div>
@@ -109,9 +112,7 @@ function App() {
               {/* Avatar */}
               <div
                 className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full mt-1 ${
-                  isUser
-                    ? 'bg-zinc-100 text-black'
-                    : 'bg-zinc-900 border border-zinc-800 text-zinc-100'
+                  isUser ? 'avatar-user' : 'avatar-bot'
                 }`}
               >
                 {isUser ? (
@@ -135,8 +136,8 @@ function App() {
                   <div
                     className={`px-4 py-3 rounded-2xl text-sm leading-relaxed w-full ${
                       isUser
-                        ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm'
-                        : 'bg-transparent text-zinc-300 rounded-tl-sm'
+                        ? 'message-bubble-user rounded-tr-sm'
+                        : 'message-bubble-assistant rounded-tl-sm'
                     }`}
                   >
                     {isUser ? (
@@ -158,10 +159,10 @@ function App() {
           (messages.length === 0 ||
             messages[messages.length - 1]?.role !== 'assistant') && (
             <div className="flex items-start gap-3 max-w-3xl mx-auto">
-              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-100 mt-1">
+              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full avatar-bot mt-1">
                 <Bot size={15} color="currentColor" />
               </div>
-              <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-transparent">
+              <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant">
                 <Loader2 size={16} className="text-zinc-500 animate-spin" />
               </div>
             </div>
@@ -169,7 +170,7 @@ function App() {
 
         {/* Error */}
         {error && (
-          <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl bg-red-950/20 border border-red-900/50 text-red-400 text-sm">
+          <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl error-message text-red-400 text-sm">
             {error.message ?? 'Something went wrong. Please try again.'}
           </div>
         )}
@@ -178,7 +179,7 @@ function App() {
       </main>
 
       {/* Input */}
-      <footer className="px-4 py-4 border-t border-zinc-900 bg-black shrink-0">
+      <footer className="px-4 py-4 border-t border-zinc-900 footer-gradient shrink-0 relative z-10">
         <div className="flex items-end gap-3 max-w-3xl mx-auto">
           <textarea
             ref={textareaRef}
@@ -187,14 +188,14 @@ function App() {
             onKeyDown={handleKeyDown}
             placeholder="Message Agent... (Shift+Enter for newline)"
             rows={1}
-            className="flex-1 resize-none bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/50 transition-all overflow-y-auto"
+            className="flex-1 resize-none input-field rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition-all overflow-y-auto"
             disabled={isLoading}
           />
           <button
             type="button"
             onClick={submit}
             disabled={isLoading || !input.trim()}
-            className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-teal-500 text-black hover:bg-teal-400 disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed transition-all"
+            className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <Loader2
