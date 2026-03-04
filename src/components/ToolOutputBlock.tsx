@@ -11,7 +11,7 @@ interface ToolOutput {
 }
 
 export const ToolOutputBlock = ({ content }: { content: ToolOutput }) => {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const output = content.output || {};
 
   return (

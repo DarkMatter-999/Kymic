@@ -2,7 +2,10 @@ import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { DefaultChatTransport } from 'ai';
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithToolCalls,
+} from 'ai';
 
 import './App.css';
 import { ReasoningBlock } from './components/ReasoningBlock';
@@ -11,6 +14,7 @@ import { ToolOutputBlock } from './components/ToolOutputBlock';
 function App() {
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: '/api/chat' }),
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
 
   const [input, setInput] = useState('');
@@ -98,7 +102,8 @@ function App() {
 
           const reasoningContent = message.parts
             .filter((p) => p.type?.includes('reasoning'))
-            .map((p) => p.delta || p.text || p.reasoning || '')
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((p: any) => p.delta || p.text || p.reasoning || '')
             .join('');
 
           const toolOutputParts = message.parts.filter((p) =>
@@ -205,7 +210,6 @@ function App() {
             placeholder="Message Agent... (Shift+Enter for newline)"
             rows={1}
             className="flex-1 resize-none input-field rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition-all overflow-y-auto"
-            disabled={isLoading}
           />
           <button
             type="button"

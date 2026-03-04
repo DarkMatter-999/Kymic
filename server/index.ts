@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, tool } from 'ai';
-import type { ModelMessage, ToolSet, UIMessage } from 'ai';
+import { streamText, convertToModelMessages } from 'ai';
+import type { ToolSet, UIMessage } from 'ai';
 import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
@@ -26,21 +26,6 @@ const provider = createOpenAICompatible({
 
 const MODEL_NAME = process.env.MODEL_NAME ?? 'default-model';
 
-function uiMessagesToModelMessages(messages: UIMessage[]): ModelMessage[] {
-  return messages.flatMap((msg): ModelMessage[] => {
-    if (msg.role !== 'user' && msg.role !== 'assistant') return [];
-
-    const textContent = msg.parts
-      .filter((p) => p.type === 'text')
-      .map((p) => (p.type === 'text' ? p.text : ''))
-      .join('');
-
-    if (!textContent) return [];
-
-    return [{ role: msg.role, content: textContent }];
-  });
-}
-
 app.post('/api/chat', async (req, res) => {
   const { messages } = req.body as { messages: UIMessage[] };
 
@@ -50,15 +35,15 @@ app.post('/api/chat', async (req, res) => {
   }
 
   try {
-    const modelMessages = uiMessagesToModelMessages(messages);
+    const modelMessages = await convertToModelMessages(messages);
 
     const codemodeTool = createCodeTool({
       tools: {
-        test: tool({
+        test: {
           description: 'A test function',
           parameters: z.object({}),
           execute: async () => Promise.resolve('Hello from the sandbox!'),
-        }),
+        },
       },
       executor: localNodeExecutor,
     });
