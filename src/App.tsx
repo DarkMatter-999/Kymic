@@ -6,6 +6,7 @@ import { DefaultChatTransport } from 'ai';
 
 import './App.css';
 import { ReasoningBlock } from './components/ReasoningBlock';
+import { ToolOutputBlock } from './components/ToolOutputBlock';
 
 function App() {
   const { messages, sendMessage, status, error } = useChat({
@@ -100,7 +101,12 @@ function App() {
             .map((p) => p.delta || p.text || p.reasoning || '')
             .join('');
 
-          if (!textContent && !reasoningContent) return null;
+          const toolOutputParts = message.parts.filter((p) =>
+            p.type.includes('tool-')
+          );
+
+          if (!textContent && !reasoningContent && toolOutputParts.length === 0)
+            return null;
 
           return (
             <div
@@ -129,6 +135,16 @@ function App() {
                 {/* Reasoning Accordion */}
                 {!isUser && reasoningContent && (
                   <ReasoningBlock content={reasoningContent} />
+                )}
+
+                {/* Tool Output Results */}
+                {!isUser && toolOutputParts.length > 0 && (
+                  <>
+                    {toolOutputParts.map((part, idx) => (
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      <ToolOutputBlock key={idx} content={part as any} />
+                    ))}
+                  </>
                 )}
 
                 {/* Main Text Bubble */}

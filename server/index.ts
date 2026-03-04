@@ -1,10 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText } from 'ai';
-import type { ModelMessage, UIMessage } from 'ai';
+import { streamText, tool } from 'ai';
+import type { ModelMessage, ToolSet, UIMessage } from 'ai';
 import dotenv from 'dotenv';
+import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
+import { localNodeExecutor } from './executor';
+import z from 'zod';
 
 dotenv.config();
 
@@ -49,10 +52,27 @@ app.post('/api/chat', async (req, res) => {
   try {
     const modelMessages = uiMessagesToModelMessages(messages);
 
+    const codemodeTool = createCodeTool({
+      tools: {
+        test: tool({
+          description: 'A test function',
+          parameters: z.object({}),
+          execute: async () => Promise.resolve('Hello from the sandbox!'),
+        }),
+      },
+      executor: localNodeExecutor,
+    });
+
+    const tools: ToolSet = {
+      codemode: codemodeTool,
+    };
+
     const result = streamText({
       model: provider.chatModel(MODEL_NAME),
       system: systemPrompt,
       messages: modelMessages,
+      tools,
+      maxSteps: 7,
     });
 
     result.pipeUIMessageStreamToResponse(res);
