@@ -1,6 +1,6 @@
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, Settings } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
   DefaultChatTransport,
@@ -10,6 +10,7 @@ import {
 import './App.css';
 import { ReasoningBlock } from './components/ReasoningBlock';
 import { ToolOutputBlock } from './components/ToolOutputBlock';
+import { SettingsModal } from './components/SettingsModal';
 
 function App() {
   const { messages, sendMessage, status, error } = useChat({
@@ -18,6 +19,7 @@ function App() {
   });
 
   const [input, setInput] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -57,22 +59,31 @@ function App() {
       <div className="grain-overlay" />
 
       {/* Header */}
-      <header className="flex items-center gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg avatar-bot">
-          <Bot size={20} className="text-zinc-100" />
+      <header className="flex items-center justify-between gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg avatar-bot">
+            <Bot size={20} className="text-zinc-100" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-zinc-100">
+              CodeMode Agent
+            </h1>
+            <p className="text-xs text-zinc-500">
+              {isLoading ? (
+                <span className="text-zinc-400 animate-pulse">Thinking...</span>
+              ) : (
+                'Ready'
+              )}
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-sm font-semibold text-zinc-100">
-            CodeMode Agent
-          </h1>
-          <p className="text-xs text-zinc-500">
-            {isLoading ? (
-              <span className="text-zinc-400 animate-pulse">Thinking...</span>
-            ) : (
-              'Ready'
-            )}
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
+        >
+          <Settings size={20} className="text-zinc-100" />
+        </button>
       </header>
 
       {/* Messages */}
@@ -229,6 +240,12 @@ function App() {
           </button>
         </div>
       </footer>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 }
