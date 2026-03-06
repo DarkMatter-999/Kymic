@@ -1,13 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, convertToModelMessages } from 'ai';
+import { streamText, convertToModelMessages, tool } from 'ai';
 import type { ToolSet, UIMessage } from 'ai';
 import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
 import { localNodeExecutor } from './executor';
 import z from 'zod';
+import { createMcpClient } from './mcp-client';
 
 dotenv.config();
 
@@ -37,14 +38,23 @@ app.post('/api/chat', async (req, res) => {
   try {
     const modelMessages = await convertToModelMessages(messages);
 
-    const codemodeTool = createCodeTool({
-      tools: {
-        test: {
-          description: 'A test function',
-          parameters: z.object({}),
-          execute: async () => Promise.resolve('Hello from the sandbox!'),
+    const mcpClient = await createMcpClient();
+    const serverToolsList = await mcpClient.listTools();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mappedTools: Record<string, any> = {};
+    for (const t of serverToolsList.tools) {
+      mappedTools[t.name] = tool({
+        description: t.description || `Execute the ${t.name} capability.`,
+        inputSchema: z.any(),
+        execute: async (args) => {
+          return await mcpClient.callTool({ name: t.name, arguments: args });
         },
-      },
+      });
+    }
+
+    const codemodeTool = createCodeTool({
+      tools: mappedTools,
       executor: localNodeExecutor,
     });
 

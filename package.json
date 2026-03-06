@@ -17,6 +17,7 @@
     "@ai-sdk/openai-compatible": "^2.0.31",
     "@ai-sdk/react": "^3.0.106",
     "@cloudflare/codemode": "^0.1.2",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@tailwindcss/vite": "^4.2.1",
     "ai": "^6.0.108",
     "autoprefixer": "^10.4.27",
