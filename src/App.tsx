@@ -2,6 +2,7 @@ import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
 import { Send, Bot, User, Loader2, Settings } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
@@ -175,8 +176,10 @@ function App() {
                     {isUser ? (
                       <p className="whitespace-pre-wrap">{textContent}</p>
                     ) : (
-                      <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
-                        <ReactMarkdown>{textContent}</ReactMarkdown>
+                      <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 markdown-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {textContent}
+                        </ReactMarkdown>
                       </div>
                     )}
                   </div>
@@ -187,18 +190,23 @@ function App() {
         })}
 
         {/* Streaming indicator */}
-        {isLoading &&
-          (messages.length === 0 ||
-            messages[messages.length - 1]?.role !== 'assistant') && (
-            <div className="flex items-start gap-3 max-w-3xl mx-auto">
-              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full avatar-bot mt-1">
-                <Bot size={15} color="currentColor" />
-              </div>
-              <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant">
-                <Loader2 size={16} className="text-zinc-500 animate-spin" />
-              </div>
+        {isLoading && (
+          <div className="flex items-start gap-3 max-w-3xl mx-auto pb-4">
+            <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full avatar-bot mt-1">
+              <Bot size={15} color="currentColor" />
             </div>
-          )}
+            <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant flex items-center gap-2">
+              <Loader2 size={16} className="text-zinc-500 animate-spin" />
+              <span className="text-xs text-zinc-500 font-medium">
+                {messages[messages.length - 1]?.parts.some((p) =>
+                  p.type.includes('tool-call')
+                )
+                  ? 'Running tools...'
+                  : 'Thinking...'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

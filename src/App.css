@@ -329,3 +329,47 @@ html {
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  background: rgba(40, 40, 45, 0.4);
+  border: 1px solid rgba(0, 128, 128, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 15px rgba(0, 128, 128, 0.05);
+}
+
+.markdown-content th {
+  padding: 12px 13px;
+  border: 1px solid rgba(0, 128, 128, 0.3);
+  background: linear-gradient(
+    135deg,
+    rgba(20, 100, 100, 0.25) 0%,
+    rgba(10, 80, 80, 0.2) 100%
+  );
+  color: #5eead4;
+  font-weight: 600;
+  text-align: left;
+}
+
+.markdown-content td {
+  padding: 10px 13px;
+  border: 1px solid rgba(0, 128, 128, 0.15);
+  color: rgba(228, 228, 231, 0.9);
+}
+
+.markdown-content tr:hover {
+  background: rgba(0, 128, 128, 0.08);
+}
+
+.markdown-content tr:nth-child(even) {
+  background: rgba(30, 30, 35, 0.3);
+}
+
+.markdown-content p {
+  line-height: 1.6;
+  color: rgba(228, 228, 231, 0.9);
+  margin: 0.75rem 0;
+}

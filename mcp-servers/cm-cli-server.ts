@@ -5,6 +5,8 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 
+const MAX_LENGTH = 10000;
+
 const execAsync = promisify(exec);
 
 const server = new McpServer({
@@ -23,6 +25,19 @@ server.registerTool(
   async ({ path }) => {
     try {
       const content = fs.readFileSync(path, 'utf-8');
+
+      if (content.length > MAX_LENGTH) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Error: File too large (${content.length} chars). Truncated output:\n\n${content.slice(0, MAX_LENGTH)}`,
+            },
+          ],
+        };
+      }
+
       return {
         content: [{ type: 'text', text: content }],
       };
@@ -96,11 +111,22 @@ server.registerTool(
         cwd: workingDir,
       });
 
-      return {
-        content: [
-          { type: 'text', text: `STDOUT:\n${stdout}\nSTDERR:\n${stderr}` },
-        ],
-      };
+      const fullOutput = `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
+
+      if (fullOutput.length > MAX_LENGTH) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Error: Command output exceeds limit. Truncated result:\n\n${fullOutput.slice(0, MAX_LENGTH)}`,
+            },
+          ],
+        };
+      }
+
+      return { content: [{ type: 'text', text: fullOutput }] };
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       return {
@@ -114,7 +140,6 @@ server.registerTool(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('CodeMode Local Server running on stdio');
 }
 
 main().catch((error) => {

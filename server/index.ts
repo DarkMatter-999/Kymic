@@ -1,14 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, convertToModelMessages, tool } from 'ai';
+import { streamText, convertToModelMessages } from 'ai';
 import type { ToolSet, UIMessage } from 'ai';
 import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
 import { localNodeExecutor } from './executor';
-import z from 'zod';
-import { createMcpClient } from './mcp-client';
+import { McpManager, type ServerConfig } from './mcp-manager';
 
 dotenv.config();
 
@@ -27,6 +26,23 @@ const provider = createOpenAICompatible({
 
 const MODEL_NAME = process.env.MODEL_NAME ?? 'default-model';
 
+const mcpManager = new McpManager();
+const servers: ServerConfig[] = [
+  {
+    name: 'CodeMode-CLI',
+    path: './mcp-servers/cm-cli-server.ts',
+    version: '1.0.0',
+  },
+];
+
+const setupMcp = async () => {
+  console.log('Initializing MCP Servers...');
+  await Promise.all(servers.map((s) => mcpManager.registerServer(s)));
+  console.log('MCP Servers Ready.');
+};
+
+setupMcp().catch(console.error);
+
 app.post('/api/chat', async (req, res) => {
   const { messages } = req.body as { messages: UIMessage[] };
 
@@ -38,20 +54,7 @@ app.post('/api/chat', async (req, res) => {
   try {
     const modelMessages = await convertToModelMessages(messages);
 
-    const mcpClient = await createMcpClient();
-    const serverToolsList = await mcpClient.listTools();
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mappedTools: Record<string, any> = {};
-    for (const t of serverToolsList.tools) {
-      mappedTools[t.name] = tool({
-        description: t.description || `Execute the ${t.name} capability.`,
-        inputSchema: z.any(),
-        execute: async (args) => {
-          return await mcpClient.callTool({ name: t.name, arguments: args });
-        },
-      });
-    }
+    const mappedTools = await mcpManager.getAllMappedTools();
 
     const codemodeTool = createCodeTool({
       tools: mappedTools,
@@ -67,7 +70,25 @@ app.post('/api/chat', async (req, res) => {
       system: systemPrompt,
       messages: modelMessages,
       tools,
-      maxSteps: 7,
+      maxSteps: 10,
+      maxRetries: 3,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      experimental_retry: async ({ error, attempt, delayBase }) => {
+        // Only retry on 429 or network errors
+        const isRateLimit =
+          error instanceof Error && error.message.includes('429');
+
+        if (isRateLimit || attempt <= 3) {
+          const delay = 15000 * Math.pow(2, attempt - 1);
+          console.log(
+            `Rate limited. Attempt ${attempt}. Retrying in ${delay / 1000}s...`
+          );
+
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return true;
+        }
+        return false;
+      },
     });
 
     result.pipeUIMessageStreamToResponse(res);
