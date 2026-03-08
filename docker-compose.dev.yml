@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    ports:
+      - '5173:5173'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - VITE_PROXY_TARGET=http://backend:3000
+      - VITE_API_URL=http://localhost:5173/api
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - dev-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: dev
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - API_KEY=${API_KEY:-}
+      - API_URL=${API_URL:-}
+      - MODEL_NAME=${MODEL_NAME:-}
+    command: npm run dev:server
+    networks:
+      - dev-network
+
+networks:
+  dev-network:
+    driver: bridge

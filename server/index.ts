@@ -12,7 +12,7 @@ import { McpManager, type ServerConfig } from './mcp-manager';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT ?? 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 app.use(cors());
 app.use(express.json());
@@ -70,25 +70,7 @@ app.post('/api/chat', async (req, res) => {
       system: systemPrompt,
       messages: modelMessages,
       tools,
-      maxSteps: 10,
       maxRetries: 3,
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      experimental_retry: async ({ error, attempt, delayBase }) => {
-        // Only retry on 429 or network errors
-        const isRateLimit =
-          error instanceof Error && error.message.includes('429');
-
-        if (isRateLimit || attempt <= 3) {
-          const delay = 15000 * Math.pow(2, attempt - 1);
-          console.log(
-            `Rate limited. Attempt ${attempt}. Retrying in ${delay / 1000}s...`
-          );
-
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          return true;
-        }
-        return false;
-      },
     });
 
     result.pipeUIMessageStreamToResponse(res);
@@ -98,6 +80,6 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

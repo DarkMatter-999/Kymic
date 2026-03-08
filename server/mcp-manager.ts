@@ -22,7 +22,7 @@ export class McpManager {
 
     const client = new Client(
       { name: config.name, version: config.version },
-      { capabilities: { tools: {} } }
+      { capabilities: {} }
     );
 
     await client.connect(transport);

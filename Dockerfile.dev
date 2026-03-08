@@ -1,0 +1,17 @@
+# Development Dockerfile with hot reload support
+FROM node:20-alpine AS dev
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Expose ports for frontend and backend
+EXPOSE 5173 3000
+
+# Default command - can be overridden by docker-compose
+CMD ["sh", "-c", "npm run dev -- --host 0.0.0.0 & npm run dev:server"]
