@@ -1,17 +1,15 @@
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
 import { Send, Bot, User, Loader2, Settings } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
 
 import './App.css';
-import { ReasoningBlock } from './components/ReasoningBlock';
-import { ToolOutputBlock } from './components/ToolOutputBlock';
 import { SettingsModal } from './components/SettingsModal';
+import { UserMessage } from './components/UserMessage';
+import { AgentMessage } from './components/AgentMessage';
 
 function App() {
   const { messages, sendMessage, status, error } = useChat({
@@ -21,19 +19,24 @@ function App() {
 
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [truncateAt, setTruncateAt] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === 'streaming' || status === 'submitted';
 
+  const displayedMessages =
+    truncateAt !== null ? messages.slice(0, truncateAt + 1) : messages;
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [displayedMessages]);
 
   const submit = () => {
     const text = input.trim();
     if (!text || isLoading) return;
     sendMessage({ role: 'user', parts: [{ type: 'text', text }] });
     setInput('');
+    setTruncateAt(null);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -52,6 +55,22 @@ function App() {
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  };
+
+  const handleEditMessage = (messageIndex: number, newContent: string) => {
+    const messageToEdit = messages[messageIndex];
+    if (!messageToEdit) return;
+
+    setTruncateAt(null);
+
+    sendMessage({
+      messageId: messageToEdit.id,
+      text: newContent,
+    });
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
   };
 
   return (
@@ -89,7 +108,7 @@ function App() {
 
       {/* Messages */}
       <main className="flex-1 overflow-y-auto px-4 py-6 space-y-6 main-content relative z-10">
-        {messages.length === 0 && (
+        {displayedMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center empty-state">
             <div className="flex items-center justify-center w-16 h-16 rounded-2xl empty-state-icon">
               <Bot size={32} className="text-zinc-400" />
@@ -105,7 +124,7 @@ function App() {
           </div>
         )}
 
-        {messages.map((message) => {
+        {displayedMessages.map((message, messageIndex) => {
           const isUser = message.role === 'user';
           const textContent = message.parts
             .filter((p) => p.type === 'text')
@@ -145,46 +164,21 @@ function App() {
                 )}
               </div>
 
-              {/* Bubble Container */}
-              <div
-                className={`flex flex-col gap-2 max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}
-              >
-                {/* Reasoning Accordion */}
-                {!isUser && reasoningContent && (
-                  <ReasoningBlock content={reasoningContent} />
-                )}
-
-                {/* Tool Output Results */}
-                {!isUser && toolOutputParts.length > 0 && (
-                  <>
-                    {toolOutputParts.map((part, idx) => (
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      <ToolOutputBlock key={idx} content={part as any} />
-                    ))}
-                  </>
-                )}
-
-                {/* Main Text Bubble */}
-                {textContent && (
-                  <div
-                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed w-full ${
-                      isUser
-                        ? 'message-bubble-user rounded-tr-sm'
-                        : 'message-bubble-assistant rounded-tl-sm'
-                    }`}
-                  >
-                    {isUser ? (
-                      <p className="whitespace-pre-wrap">{textContent}</p>
-                    ) : (
-                      <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 markdown-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {textContent}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* Message Bubble */}
+              {isUser ? (
+                <UserMessage
+                  content={textContent}
+                  onEdit={(newContent) =>
+                    handleEditMessage(messageIndex, newContent)
+                  }
+                />
+              ) : (
+                <AgentMessage
+                  textContent={textContent}
+                  reasoningContent={reasoningContent}
+                  toolOutputParts={toolOutputParts}
+                />
+              )}
             </div>
           );
         })}
@@ -198,8 +192,8 @@ function App() {
             <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant flex items-center gap-2">
               <Loader2 size={16} className="text-zinc-500 animate-spin" />
               <span className="text-xs text-zinc-500 font-medium">
-                {messages[messages.length - 1]?.parts.some((p) =>
-                  p.type.includes('tool-call')
+                {displayedMessages[displayedMessages.length - 1]?.parts.some(
+                  (p) => p.type.includes('tool-call')
                 )
                   ? 'Running tools...'
                   : 'Thinking...'}
