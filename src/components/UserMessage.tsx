@@ -1,18 +1,31 @@
 import { Copy, Edit2, Check } from 'lucide-react';
 import { useState } from 'react';
 
+interface MessagePart {
+  type: string;
+  text?: string;
+}
+
 interface UserMessageProps {
-  content: string;
+  message: {
+    parts: MessagePart[];
+  };
   onEdit: (newContent: string) => void;
 }
 
-export function UserMessage({ content, onEdit }: UserMessageProps) {
+export function UserMessage({ message, onEdit }: UserMessageProps) {
   const [isCopied, setIsCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [editedContent, setEditedContent] = useState(content);
+
+  const textContent = message.parts
+    .filter((p) => p.type === 'text')
+    .map((p) => p.text || '')
+    .join('');
+
+  const [editedContent, setEditedContent] = useState(textContent);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
+    await navigator.clipboard.writeText(textContent);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
@@ -25,7 +38,7 @@ export function UserMessage({ content, onEdit }: UserMessageProps) {
   };
 
   const handleEditCancel = () => {
-    setEditedContent(content);
+    setEditedContent(textContent);
     setIsEditing(false);
   };
 
@@ -82,7 +95,7 @@ export function UserMessage({ content, onEdit }: UserMessageProps) {
 
       {/* Main Message Bubble */}
       <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed message-bubble-user">
-        <p className="whitespace-pre-wrap">{content}</p>
+        <p className="whitespace-pre-wrap">{textContent}</p>
       </div>
     </div>
   );

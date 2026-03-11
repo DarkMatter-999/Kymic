@@ -126,23 +126,8 @@ function App() {
 
         {displayedMessages.map((message, messageIndex) => {
           const isUser = message.role === 'user';
-          const textContent = message.parts
-            .filter((p) => p.type === 'text')
-            .map((p) => p.text || '')
-            .join('');
 
-          const reasoningContent = message.parts
-            .filter((p) => p.type?.includes('reasoning'))
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((p: any) => p.delta || p.text || p.reasoning || '')
-            .join('');
-
-          const toolOutputParts = message.parts.filter((p) =>
-            p.type.includes('tool-')
-          );
-
-          if (!textContent && !reasoningContent && toolOutputParts.length === 0)
-            return null;
+          if (message.parts.length === 0) return null;
 
           return (
             <div
@@ -167,17 +152,13 @@ function App() {
               {/* Message Bubble */}
               {isUser ? (
                 <UserMessage
-                  content={textContent}
+                  message={message}
                   onEdit={(newContent) =>
                     handleEditMessage(messageIndex, newContent)
                   }
                 />
               ) : (
-                <AgentMessage
-                  textContent={textContent}
-                  reasoningContent={reasoningContent}
-                  toolOutputParts={toolOutputParts}
-                />
+                <AgentMessage message={message} />
               )}
             </div>
           );
