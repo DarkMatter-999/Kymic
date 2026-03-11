@@ -1,4 +1,4 @@
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,10 +17,17 @@ interface MessagePart {
 interface AgentMessageProps {
   message: {
     parts: MessagePart[];
+    id?: string;
   };
+  messageIndex?: number;
+  onRegenerate?: (messageIndex: number) => void;
 }
 
-export function AgentMessage({ message }: AgentMessageProps) {
+export function AgentMessage({
+  message,
+  messageIndex,
+  onRegenerate,
+}: AgentMessageProps) {
   const [isCopied, setIsCopied] = useState(false);
 
   const hasContent = message.parts.some(
@@ -72,7 +79,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
         if (part.type === 'text' && part.text) {
           return (
             <div key={idx} className="flex flex-col items-start w-full">
-              <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed w-fit message-bubble-assistant rounded-tl-sm">
+              <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed w-fit message-bubble-assistant rounded-tl-sm w-full">
                 <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {textContent}
@@ -80,7 +87,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
                 </div>
               </div>
 
-              <div className="flex items-center mt-1 px-1">
+              <div className="flex items-center mt-1 px-1 gap-1">
                 <button
                   onClick={handleCopy}
                   className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-full transition-all"
@@ -92,6 +99,15 @@ export function AgentMessage({ message }: AgentMessageProps) {
                     <Copy size={16} />
                   )}
                 </button>
+                {messageIndex !== undefined && onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(messageIndex)}
+                    className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-full transition-all"
+                    title="Regenerate message"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
               </div>
             </div>
           );

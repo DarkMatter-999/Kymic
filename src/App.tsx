@@ -1,6 +1,6 @@
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Loader2, Settings } from 'lucide-react';
+import { Send, Bot, User, Loader2, Settings, Square } from 'lucide-react';
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
@@ -12,7 +12,7 @@ import { UserMessage } from './components/UserMessage';
 import { AgentMessage } from './components/AgentMessage';
 
 function App() {
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, status, error, stop } = useChat({
     transport: new DefaultChatTransport({ api: '/api/chat' }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
@@ -31,10 +31,10 @@ function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedMessages]);
 
-  const submit = () => {
+  const submit = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
-    sendMessage({ role: 'user', parts: [{ type: 'text', text }] });
+    await sendMessage({ role: 'user', parts: [{ type: 'text', text }] });
     setInput('');
     setTruncateAt(null);
     if (textareaRef.current) {
@@ -71,6 +71,35 @@ function App() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+  };
+
+  const handleRegenerate = async (messageIndex: number) => {
+    const messageToRegenerate = messages[messageIndex];
+    if (!messageToRegenerate || messageToRegenerate.role !== 'assistant')
+      return;
+
+    setTruncateAt(null);
+
+    let lastUserMessageIndex = -1;
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMessageIndex = i;
+        break;
+      }
+    }
+
+    if (lastUserMessageIndex === -1) return;
+
+    const lastUserMessage = messages[lastUserMessageIndex];
+    const userText = lastUserMessage.parts
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text || '')
+      .join('');
+
+    await sendMessage({
+      messageId: lastUserMessage.id,
+      text: userText,
+    });
   };
 
   return (
@@ -158,7 +187,11 @@ function App() {
                   }
                 />
               ) : (
-                <AgentMessage message={message} />
+                <AgentMessage
+                  message={message}
+                  messageIndex={messageIndex}
+                  onRegenerate={handleRegenerate}
+                />
               )}
             </div>
           );
@@ -205,22 +238,28 @@ function App() {
             rows={1}
             className="flex-1 resize-none input-field rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition-all overflow-y-auto"
           />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={isLoading || !input.trim()}
-            className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed"
-          >
-            {isLoading ? (
-              <Loader2
-                size={18}
-                className="animate-spin"
-                color="currentColor"
-              />
-            ) : (
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={() => stop()}
+              className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-zinc-700 hover:bg-zinc-800 transition-colors"
+              title="Stop generation"
+              key="stop-btn"
+            >
+              <Square size={18} className="text-red-500 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              key="send-btn"
+              disabled={isLoading || !input.trim()}
+              className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabl
+              ed:cursor-not-allowed"
+            >
               <Send size={18} color="currentColor" />
-            )}
-          </button>
+            </button>
+          )}
         </div>
       </footer>
 

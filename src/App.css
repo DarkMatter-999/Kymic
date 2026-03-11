@@ -372,3 +372,7 @@ html {
   color: rgba(228, 228, 231, 0.9);
   margin: 0.75rem 0;
 }
+
+pre {
+  overflow: auto;
+}
