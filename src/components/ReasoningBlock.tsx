@@ -14,7 +14,7 @@ export const ReasoningBlock = ({ content }: { content: string }) => {
           size={14}
           className="group-hover:text-teal-400 transition-colors duration-200 group-hover:drop-shadow-[0_0_8px_rgba(0,128,128,0.5)]"
         />
-        <span className="bg-gradient-to-r from-zinc-400 to-teal-300 bg-clip-text text-transparent group-hover:from-teal-300 group-hover:to-teal-200 transition-all duration-200">
+        <span className="bg-linear-to-r from-zinc-400 to-teal-300 bg-clip-text text-transparent group-hover:from-teal-300 group-hover:to-teal-200 transition-all duration-200">
           Thought Process
         </span>
         <ChevronDown
@@ -31,8 +31,8 @@ export const ReasoningBlock = ({ content }: { content: string }) => {
         }`}
       >
         <div className="overflow-hidden">
-          <div className="mt-2 pl-4 border-l-2 border-gradient-to-b from-teal-500/50 to-teal-500/10 text-xs text-zinc-400 font-mono whitespace-pre-wrap leading-relaxed break-words relative">
-            <div className="absolute -inset-2 bg-gradient-to-r from-teal-500/5 via-transparent to-teal-500/5 rounded blur-sm pointer-events-none" />
+          <div className="mt-2 pl-4 border-l-2 border-gradient-to-b from-teal-500/50 to-teal-500/10 text-xs text-zinc-400 font-mono whitespace-pre-wrap leading-relaxed wrap-break-words relative">
+            <div className="absolute -inset-2 bg-linear-to-r from-teal-500/5 via-transparent to-teal-500/5 rounded blur-sm pointer-events-none" />
 
             <div className="relative z-10 hover:text-zinc-300 transition-colors duration-200">
               {content}

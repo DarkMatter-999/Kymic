@@ -79,8 +79,8 @@ export function AgentMessage({
         if (part.type === 'text' && part.text) {
           return (
             <div key={idx} className="flex flex-col items-start w-full">
-              <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed w-fit message-bubble-assistant rounded-tl-sm w-full">
-                <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
+              <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed message-bubble-assistant rounded-tl-sm w-full">
+                <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 markdown-content">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {textContent}
                   </ReactMarkdown>

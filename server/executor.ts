@@ -35,6 +35,7 @@ export const localNodeExecutor = {
       return { result };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
+      console.error(error);
       return { result: undefined, error: error?.message, logs: [error?.stack] };
     }
   },
