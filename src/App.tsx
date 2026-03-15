@@ -1,6 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Loader2, Settings, Square } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+import { Send, Bot, User, Loader2, Settings, Square, Zap } from 'lucide-react';
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
@@ -12,10 +13,72 @@ import { UserMessage } from './components/UserMessage';
 import { AgentMessage } from './components/AgentMessage';
 
 function App() {
+  const [conversationId] = useState(() => uuidv4());
+
   const { messages, sendMessage, status, error, stop } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
+    transport: new DefaultChatTransport({
+      api: '/api/chat',
+      body: { conversationId },
+    }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
+
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [subagents, setSubagents] = useState<Record<string, any>>({});
+  const [showSidebar, setShowSidebar] = useState(false);
+
+  useEffect(() => {
+    const ws = new WebSocket(
+      `ws://localhost:3000?conversationId=${conversationId}`
+    );
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type?.startsWith('subagent_')) {
+          setSubagents((prev) => {
+            const current = prev[data.subagentId] || {
+              id: data.subagentId,
+              status: 'started',
+              text: '',
+            };
+
+            let newStatus = current.status;
+            let newText = current.text;
+            let newResult = current.result;
+
+            if (data.type === 'subagent_started') newStatus = 'running';
+            if (data.type === 'subagent_update') newText = data.text;
+            if (data.type === 'subagent_tool_start') newStatus = 'tool_call';
+            if (data.type === 'subagent_finished') {
+              newStatus = 'finished';
+              newResult = data.result;
+            }
+            if (data.type === 'subagent_error') {
+              newStatus = 'error';
+              newResult = data.error;
+            }
+
+            return {
+              ...prev,
+              [data.subagentId]: {
+                ...current,
+                status: newStatus,
+                text: newText,
+                result: newResult,
+                task: data.task || current.task,
+              },
+            };
+          });
+        }
+      } catch (err) {
+        console.error('Failed to parse WS message', err);
+      }
+    };
+
+    return () => ws.close();
+  }, [conversationId]);
 
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -103,165 +166,256 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-black text-zinc-100 relative app-container">
+    <div className="flex h-screen bg-black text-zinc-100 relative app-container overflow-hidden w-full">
       {/* Grain Overlay */}
       <div className="grain-overlay" />
 
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg avatar-bot">
-            <Bot size={20} className="text-zinc-100" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold text-zinc-100">
-              CodeMode Agent
-            </h1>
-            <p className="text-xs text-zinc-500">
-              {isLoading ? (
-                <span className="text-zinc-400 animate-pulse">Thinking...</span>
-              ) : (
-                'Ready'
-              )}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
-        >
-          <Settings size={20} className="text-zinc-100" />
-        </button>
-      </header>
-
-      {/* Messages */}
-      <main className="flex-1 overflow-y-auto px-4 py-6 space-y-6 main-content relative z-10">
-        {displayedMessages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-center empty-state">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl empty-state-icon">
-              <Bot size={32} className="text-zinc-400" />
+      {/* Main Chat Area (Left Pane) */}
+      <div
+        className={`flex flex-col h-full transition-all duration-300 ${showSidebar ? 'w-full md:w-2/3 lg:w-3/4 border-r border-zinc-900' : 'w-full'}`}
+      >
+        {/* Header */}
+        <header className="flex items-center justify-between gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg avatar-bot">
+              <Bot size={20} className="text-zinc-100" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-100">
-                How can I help you?
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Start a conversation below.
+              <h1 className="text-sm font-semibold text-zinc-100">
+                CodeMode Agent
+              </h1>
+              <p className="text-xs text-zinc-500">
+                {isLoading ? (
+                  <span className="text-zinc-400 animate-pulse">
+                    Thinking...
+                  </span>
+                ) : (
+                  'Ready'
+                )}
               </p>
             </div>
           </div>
-        )}
-
-        {displayedMessages.map((message, messageIndex) => {
-          const isUser = message.role === 'user';
-
-          if (message.parts.length === 0) return null;
-
-          return (
-            <div
-              key={message.id}
-              className={`flex items-start gap-3 max-w-3xl mx-auto ${
-                isUser ? 'flex-row-reverse' : 'flex-row'
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSidebar((prev) => !prev)}
+              className={`flex items-center justify-center h-9 px-3 rounded-lg hover:bg-zinc-900 transition-colors shrink-0 text-sm font-medium ${
+                showSidebar ? 'text-zinc-100 bg-zinc-800/50' : 'text-zinc-400'
               }`}
             >
-              {/* Avatar */}
+              <Zap
+                size={16}
+                className={`mr-2 ${showSidebar ? 'text-yellow-500' : 'text-zinc-500'}`}
+              />
+              {showSidebar ? 'Hide Subagents' : 'Show Subagents'}
+              <span className="ml-2 bg-yellow-500/20 text-yellow-500 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                {Object.keys(subagents).length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettings(true)}
+              className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
+            >
+              <Settings size={20} className="text-zinc-100" />
+            </button>
+          </div>
+        </header>
+
+        {/* Messages */}
+        <main className="flex-1 overflow-y-auto px-4 py-6 space-y-6 main-content relative z-10">
+          {displayedMessages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center empty-state">
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl empty-state-icon">
+                <Bot size={32} className="text-zinc-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-100">
+                  How can I help you?
+                </h2>
+                <p className="text-sm text-zinc-500 mt-1">
+                  Start a conversation below.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {displayedMessages.map((message, messageIndex) => {
+            const isUser = message.role === 'user';
+
+            if (message.parts.length === 0) return null;
+
+            return (
               <div
-                className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full mt-1 ${
-                  isUser ? 'avatar-user' : 'avatar-bot'
+                key={message.id}
+                className={`flex items-start gap-3 max-w-3xl mx-auto ${
+                  isUser ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
+                {/* Avatar */}
+                <div
+                  className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full mt-1 ${
+                    isUser ? 'avatar-user' : 'avatar-bot'
+                  }`}
+                >
+                  {isUser ? (
+                    <User size={15} color="currentColor" />
+                  ) : (
+                    <Bot size={15} color="currentColor" />
+                  )}
+                </div>
+
+                {/* Message Bubble */}
                 {isUser ? (
-                  <User size={15} color="currentColor" />
+                  <UserMessage
+                    message={message}
+                    onEdit={(newContent) =>
+                      handleEditMessage(messageIndex, newContent)
+                    }
+                  />
                 ) : (
-                  <Bot size={15} color="currentColor" />
+                  <AgentMessage
+                    message={message}
+                    messageIndex={messageIndex}
+                    onRegenerate={handleRegenerate}
+                  />
                 )}
               </div>
+            );
+          })}
 
-              {/* Message Bubble */}
-              {isUser ? (
-                <UserMessage
-                  message={message}
-                  onEdit={(newContent) =>
-                    handleEditMessage(messageIndex, newContent)
-                  }
-                />
-              ) : (
-                <AgentMessage
-                  message={message}
-                  messageIndex={messageIndex}
-                  onRegenerate={handleRegenerate}
-                />
-              )}
+          {/* Streaming indicator */}
+          {isLoading && (
+            <div className="flex items-start gap-3 max-w-3xl mx-auto pb-4">
+              <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full avatar-bot mt-1">
+                <Bot size={15} color="currentColor" />
+              </div>
+              <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant flex items-center gap-2">
+                <Loader2 size={16} className="text-zinc-500 animate-spin" />
+                <span className="text-xs text-zinc-500 font-medium">
+                  {displayedMessages[displayedMessages.length - 1]?.parts.some(
+                    (p) => p.type.includes('tool-call')
+                  )
+                    ? 'Running tools...'
+                    : 'Thinking...'}
+                </span>
+              </div>
             </div>
-          );
-        })}
-
-        {/* Streaming indicator */}
-        {isLoading && (
-          <div className="flex items-start gap-3 max-w-3xl mx-auto pb-4">
-            <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full avatar-bot mt-1">
-              <Bot size={15} color="currentColor" />
-            </div>
-            <div className="px-4 py-3 rounded-2xl rounded-tl-sm message-bubble-assistant flex items-center gap-2">
-              <Loader2 size={16} className="text-zinc-500 animate-spin" />
-              <span className="text-xs text-zinc-500 font-medium">
-                {displayedMessages[displayedMessages.length - 1]?.parts.some(
-                  (p) => p.type.includes('tool-call')
-                )
-                  ? 'Running tools...'
-                  : 'Thinking...'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl error-message text-red-400 text-sm">
-            {error.message ?? 'Something went wrong. Please try again.'}
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </main>
-
-      {/* Input */}
-      <footer className="px-4 py-4 border-t border-zinc-900 footer-gradient shrink-0 relative z-10">
-        <div className="flex items-end gap-3 max-w-3xl mx-auto">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            placeholder="Message Agent... (Shift+Enter for newline)"
-            rows={1}
-            className="flex-1 resize-none input-field rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition-all overflow-y-auto"
-          />
-          {isLoading ? (
-            <button
-              type="button"
-              onClick={() => stop()}
-              className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-zinc-700 hover:bg-zinc-800 transition-colors"
-              title="Stop generation"
-              key="stop-btn"
-            >
-              <Square size={18} className="text-red-500 fill-current" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={submit}
-              key="send-btn"
-              disabled={isLoading || !input.trim()}
-              className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabl
-              ed:cursor-not-allowed"
-            >
-              <Send size={18} color="currentColor" />
-            </button>
           )}
-        </div>
-      </footer>
+
+          {/* Error */}
+          {error && (
+            <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl error-message text-red-400 text-sm">
+              {error.message ?? 'Something went wrong. Please try again.'}
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </main>
+
+        {/* Input */}
+        <footer className="px-4 py-4 border-t border-zinc-900 footer-gradient shrink-0 relative z-10">
+          <div className="flex items-end gap-3 max-w-3xl mx-auto">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder="Message Agent... (Shift+Enter for newline)"
+              rows={1}
+              className="flex-1 resize-none input-field rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none transition-all overflow-y-auto"
+            />
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-zinc-700 hover:bg-zinc-800 transition-colors"
+                title="Stop generation"
+                key="stop-btn"
+              >
+                <Square size={18} className="text-red-500 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submit}
+                key="send-btn"
+                disabled={isLoading || !input.trim()}
+                className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabl
+              ed:cursor-not-allowed"
+              >
+                <Send size={18} color="currentColor" />
+              </button>
+            )}
+          </div>
+        </footer>
+      </div>
+
+      {/* Subagents Sidebar (Right Pane) */}
+      {showSidebar && (
+        <aside className="hidden md:flex flex-col w-1/3 lg:w-1/4 h-full bg-zinc-950/80 backdrop-blur-sm z-10 shrink-0 border-l border-zinc-900">
+          <header className="px-6 py-6 border-b border-zinc-900 header-gradient shrink-0">
+            <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+              <Zap size={20} className="text-yellow-500" />
+              Active Subagents
+            </h2>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            {Object.values(subagents).map((agent) => (
+              <div
+                key={agent.id}
+                className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {agent.status === 'running' ||
+                    agent.status === 'tool_call' ? (
+                      <Loader2
+                        size={14}
+                        className="text-yellow-500 animate-spin"
+                      />
+                    ) : (
+                      <Zap
+                        size={14}
+                        className={
+                          agent.status === 'finished'
+                            ? 'text-green-500'
+                            : 'text-red-500'
+                        }
+                      />
+                    )}
+                    <span className="text-xs font-semibold text-zinc-200">
+                      ID: {agent.id.slice(0, 8)}
+                    </span>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded bg-zinc-800 text-zinc-400">
+                    {agent.status.replace('_', ' ')}
+                  </span>
+                </div>
+
+                {agent.task && (
+                  <div className="text-xs text-zinc-300 leading-relaxed border-l-2 border-zinc-700 pl-3 py-1">
+                    {agent.task}
+                  </div>
+                )}
+
+                {agent.status !== 'finished' && agent.text && (
+                  <div className="text-xs text-zinc-500 font-mono truncate bg-zinc-950/50 p-2 rounded border border-zinc-800">
+                    {agent.text}
+                  </div>
+                )}
+
+                {agent.status === 'finished' && agent.result && (
+                  <div className="mt-2 bg-zinc-950 p-3 rounded-lg text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar border border-zinc-800 shadow-inner">
+                    {agent.result}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
 
       {/* Settings Modal */}
       <SettingsModal

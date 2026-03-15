@@ -163,6 +163,15 @@ server.registerTool(
   async ({ pattern }) => {
     try {
       const files = await glob(pattern, { nodir: true });
+      if (JSON.stringify(files).length > MAX_LENGTH) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text', text: 'Error: File list exceeds maximum length.' },
+          ],
+        };
+      }
+
       return {
         content: [
           {

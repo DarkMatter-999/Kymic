@@ -35,12 +35,35 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
+      - REDIS_URL=redis://redis:6379
       - API_KEY=${API_KEY:-}
       - API_URL=${API_URL:-}
       - MODEL_NAME=${MODEL_NAME:-}
     command: npm run dev:server
+    depends_on:
+      - redis
     networks:
       - dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: code-mode-agents-redis-dev
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data-dev:/data
+    networks:
+      - dev-network
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-data-dev:
+    driver: local
 
 networks:
   dev-network:

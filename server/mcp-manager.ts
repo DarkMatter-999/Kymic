@@ -31,7 +31,8 @@ export class McpManager {
     return { client, name: config.name };
   }
 
-  async getAllMappedTools() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getAllMappedTools(context?: Record<string, any>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allTools: Record<string, any> = {};
 
@@ -46,7 +47,12 @@ export class McpManager {
           description: t.description,
           inputSchema: z.any(),
           execute: async (args) => {
-            return await client.callTool({ name: t.name, arguments: args });
+            const mergedArgs = { ...args, ...context };
+            const result = await client.callTool({
+              name: t.name,
+              arguments: mergedArgs,
+            });
+            return result;
           },
         });
       }
