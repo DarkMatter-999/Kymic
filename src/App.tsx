@@ -23,7 +23,6 @@ function App() {
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
 
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [subagents, setSubagents] = useState<Record<string, any>>({});
   const [showSidebar, setShowSidebar] = useState(false);
@@ -172,7 +171,7 @@ function App() {
 
       {/* Main Chat Area (Left Pane) */}
       <div
-        className={`flex flex-col h-full transition-all duration-300 ${showSidebar ? 'w-full md:w-2/3 lg:w-3/4 border-r border-zinc-900' : 'w-full'}`}
+        className={`flex flex-col h-full transition-all duration-300 w-full`}
       >
         {/* Header */}
         <header className="flex items-center justify-between gap-3 px-6 py-4 border-b border-zinc-900 header-gradient shrink-0 relative z-10">
@@ -199,16 +198,14 @@ function App() {
             <button
               type="button"
               onClick={() => setShowSidebar((prev) => !prev)}
-              className={`flex items-center justify-center h-9 px-3 rounded-lg hover:bg-zinc-900 transition-colors shrink-0 text-sm font-medium ${
-                showSidebar ? 'text-zinc-100 bg-zinc-800/50' : 'text-zinc-400'
+              className={`flex items-center justify-center h-9 px-3 rounded-lg hover:bg-zinc-900 transition-colors shrink-0 text-sm font-medium text-zinc-400'
               }`}
             >
-              <Zap
-                size={16}
-                className={`mr-2 ${showSidebar ? 'text-yellow-500' : 'text-zinc-500'}`}
-              />
+              <Zap size={16} className={`mr-2 text-teal-400`} />
               {showSidebar ? 'Hide Subagents' : 'Show Subagents'}
-              <span className="ml-2 bg-yellow-500/20 text-yellow-500 px-1.5 py-0.5 rounded text-[10px] font-bold">
+              <span
+                className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${Object.values(subagents).some((agent) => agent.status !== 'finished') ? 'bg-yellow-500/20 text-yellow-500' : 'bg-teal-500/20 text-teal-500 '}`}
+              >
                 {Object.keys(subagents).length}
               </span>
             </button>
@@ -356,7 +353,16 @@ function App() {
         <aside className="hidden md:flex flex-col w-1/3 lg:w-1/4 h-full bg-zinc-950/80 backdrop-blur-sm z-10 shrink-0 border-l border-zinc-900">
           <header className="px-6 py-6 border-b border-zinc-900 header-gradient shrink-0">
             <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-              <Zap size={20} className="text-yellow-500" />
+              <Zap
+                size={20}
+                className={
+                  Object.values(subagents).some(
+                    (agent) => agent.status !== 'finished'
+                  )
+                    ? 'text-yellow-500'
+                    : 'text-teal-500'
+                }
+              />
               Active Subagents
             </h2>
           </header>
@@ -380,7 +386,7 @@ function App() {
                         size={14}
                         className={
                           agent.status === 'finished'
-                            ? 'text-green-500'
+                            ? 'text-teal-500'
                             : 'text-red-500'
                         }
                       />

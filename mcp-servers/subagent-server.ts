@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
-import { streamText } from 'ai';
+import { streamText, stepCountIs } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
@@ -101,7 +101,8 @@ server.registerTool(
         tools: {
           codemode: codemodeTool,
         },
-        maxRetries: 3,
+        maxRetries: 4,
+        stopWhen: stepCountIs(10),
       });
 
       let fullText = '';

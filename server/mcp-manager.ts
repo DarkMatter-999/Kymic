@@ -52,7 +52,11 @@ export class McpManager {
               name: t.name,
               arguments: mergedArgs,
             });
-            return result;
+            const textContent =
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (result.content as any[])?.find((c) => c.type === 'text')?.text ||
+              '';
+            return textContent;
           },
         });
       }
