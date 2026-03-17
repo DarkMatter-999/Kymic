@@ -3,7 +3,6 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import Redis from 'ioredis';
 import cors from 'cors';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, convertToModelMessages } from 'ai';
 import type { ToolSet, UIMessage } from 'ai';
 import dotenv from 'dotenv';
@@ -11,6 +10,7 @@ import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
 import { localNodeExecutor } from './executor';
 import { McpManager, type ServerConfig } from './mcp-manager';
+import { getModel } from './provider';
 
 dotenv.config();
 
@@ -20,15 +20,6 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 app.use(cors());
 app.use(express.json());
-
-const provider = createOpenAICompatible({
-  name: 'OpenAI-Compatible Provider',
-  apiKey: process.env.API_KEY ?? '',
-  baseURL: process.env.API_URL ?? '',
-  includeUsage: true,
-});
-
-const MODEL_NAME = process.env.MODEL_NAME ?? 'default-model';
 
 const mcpManager = new McpManager();
 const servers: ServerConfig[] = [
@@ -78,7 +69,7 @@ app.post('/api/chat', async (req, res) => {
     };
 
     const result = streamText({
-      model: provider.chatModel(MODEL_NAME),
+      model: getModel(),
       system: systemPrompt,
       messages: modelMessages,
       tools,

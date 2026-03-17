@@ -4,20 +4,13 @@ import { z } from 'zod';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { streamText, stepCountIs } from 'ai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
 import { localNodeExecutor } from '../server/executor';
 import { McpManager } from '../server/mcp-manager';
+import { getModel } from '../server/provider';
 
 dotenv.config();
-
-const provider = createOpenAICompatible({
-  name: 'OpenAI-Compatible Provider',
-  apiKey: process.env.API_KEY ?? '',
-  baseURL: process.env.API_URL ?? '',
-});
-const MODEL_NAME = process.env.MODEL_NAME ?? 'default-model';
 
 const redisPublisher = new Redis(
   process.env.REDIS_URL ?? 'redis://localhost:6379'
@@ -95,7 +88,7 @@ server.registerTool(
 
     try {
       const result = streamText({
-        model: provider.chatModel(MODEL_NAME),
+        model: getModel(),
         system: systemPrompt,
         prompt: task,
         tools: {
