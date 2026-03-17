@@ -9,6 +9,7 @@ import { createCodeTool } from '@cloudflare/codemode/ai';
 import { localNodeExecutor } from '../server/executor';
 import { McpManager } from '../server/mcp-manager';
 import { getModel } from '../server/provider';
+import { getMcpServersConfig } from '../server/mcp-servers-config';
 
 dotenv.config();
 
@@ -22,11 +23,6 @@ const server = new McpServer({
 });
 
 const subagentMcpManager = new McpManager();
-await subagentMcpManager.registerServer({
-  name: 'CodeMode-CLI',
-  path: './mcp-servers/cm-cli-server.ts',
-  version: '1.0.0',
-});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const publishEvent = (conversationId: string, event: any) => {
@@ -159,6 +155,13 @@ server.registerTool(
 );
 
 async function main() {
+  const serversConfig = getMcpServersConfig(['Subagent-Server']);
+  await Promise.all(
+    serversConfig.map((serverConfig) =>
+      subagentMcpManager.registerServer(serverConfig)
+    )
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

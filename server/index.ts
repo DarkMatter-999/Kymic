@@ -9,8 +9,9 @@ import dotenv from 'dotenv';
 import { createCodeTool } from '@cloudflare/codemode/ai';
 import { systemPrompt } from './prompt';
 import { localNodeExecutor } from './executor';
-import { McpManager, type ServerConfig } from './mcp-manager';
+import { McpManager } from './mcp-manager';
 import { getModel } from './provider';
+import { getMcpServersConfig } from './mcp-servers-config';
 
 dotenv.config();
 
@@ -22,21 +23,10 @@ app.use(cors());
 app.use(express.json());
 
 const mcpManager = new McpManager();
-const servers: ServerConfig[] = [
-  {
-    name: 'CodeMode-CLI',
-    path: './mcp-servers/cm-cli-server.ts',
-    version: '1.0.0',
-  },
-  {
-    name: 'Subagent-Server',
-    path: './mcp-servers/subagent-server.ts',
-    version: '1.0.0',
-  },
-];
 
 const setupMcp = async () => {
   console.log('Initializing MCP Servers...');
+  const servers = getMcpServersConfig();
   await Promise.all(servers.map((s) => mcpManager.registerServer(s)));
   console.log('MCP Servers Ready.');
 };
