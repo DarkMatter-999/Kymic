@@ -13,9 +13,7 @@ import { getMcpServersConfig } from '../server/mcp-servers-config';
 
 dotenv.config();
 
-const redisPublisher = new Redis(
-  process.env.REDIS_URL ?? 'redis://localhost:6379'
-);
+const redisPublisher = new Redis(process.env.REDIS_URL ?? 'redis://redis:6379');
 
 const server = new McpServer({
   name: 'Subagent-Server',

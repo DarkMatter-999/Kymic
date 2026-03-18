@@ -20,7 +20,7 @@ const server = http.createServer(app);
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '16mb' }));
 
 const mcpManager = new McpManager();
 
@@ -102,7 +102,7 @@ wss.on('connection', (ws, req) => {
 
 // Redis Subscriber Setup
 const redisSubscriber = new Redis(
-  process.env.REDIS_URL ?? 'redis://localhost:6379'
+  process.env.REDIS_URL ?? 'redis://redis:6379'
 );
 
 redisSubscriber.psubscribe('conversation:*', (err, count) => {

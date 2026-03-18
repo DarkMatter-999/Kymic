@@ -15,6 +15,11 @@ export const mcpServersConfig: ServerConfig[] = [
     path: './mcp-servers/subagent-server.ts',
     version: '1.0.0',
   },
+  {
+    name: 'Canvas-Server',
+    path: './mcp-servers/canvas-server.ts',
+    version: '1.0.0',
+  },
 ];
 
 /**
