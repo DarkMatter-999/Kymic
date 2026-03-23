@@ -172,16 +172,29 @@ server.registerTool(
       const { stdout, stderr } = await execAsync(commandStr, {
         cwd: cwd || os.tmpdir(),
       });
-      const output = `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
+
       return {
-        content: [{ type: 'text', text: output.slice(0, MAX_LENGTH) }],
+        content: [
+          {
+            type: 'text',
+            text: `STDOUT:\n${stdout}\nSTDERR:\n${stderr}`.slice(0, MAX_LENGTH),
+          },
+        ],
         isError: false,
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
+      const errorOutput = [
+        `Command failed: ${error.message}`,
+        error.stdout ? `STDOUT:\n${error.stdout}` : '',
+        error.stderr ? `STDERR:\n${error.stderr}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
       return {
         isError: true,
-        content: [{ type: 'text', text: `Command failed: ${error.message}` }],
+        content: [{ type: 'text', text: errorOutput.slice(0, MAX_LENGTH) }],
       };
     }
   }

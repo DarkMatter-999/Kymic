@@ -20,6 +20,11 @@ export const mcpServersConfig: ServerConfig[] = [
     path: './mcp-servers/canvas-server.ts',
     version: '1.0.0',
   },
+  {
+    name: 'Skill-Manager',
+    path: './mcp-servers/skill-manager-server.ts',
+    version: '1.0.0',
+  },
 ];
 
 /**
