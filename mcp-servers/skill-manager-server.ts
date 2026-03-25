@@ -6,12 +6,17 @@ import path from 'path';
 
 const SKILLS_DIR = path.join(process.cwd(), 'skills');
 
-async function ensureSkillsDir() {
-  try {
-    await fs.access(SKILLS_DIR);
-  } catch {
-    await fs.mkdir(SKILLS_DIR, { recursive: true });
+function resolveSkillPath(skillId: string): string {
+  const resolved = path.resolve(SKILLS_DIR, path.basename(skillId));
+  const skillsRoot = path.resolve(SKILLS_DIR);
+  if (!resolved.startsWith(skillsRoot + path.sep) && resolved !== skillsRoot) {
+    throw new Error(`Invalid skill ID: "${skillId}"`);
   }
+  return resolved;
+}
+
+async function ensureSkillsDir() {
+  await fs.mkdir(SKILLS_DIR, { recursive: true });
 }
 
 async function getAvailableSkillIds(): Promise<string[]> {
@@ -53,12 +58,12 @@ function parseSkillContent(id: string, rawContent: string): SkillData {
 }
 
 async function readSkill(skillId: string): Promise<SkillData | null> {
-  const skillPath = path.join(SKILLS_DIR, skillId, 'SKILL.md');
+  const skillDir = resolveSkillPath(skillId);
+  const skillPath = path.join(skillDir, 'SKILL.md');
   try {
     const content = await fs.readFile(skillPath, 'utf-8');
     return parseSkillContent(skillId, content);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
-  } catch (error: any) {
+  } catch {
     return null;
   }
 }
@@ -108,14 +113,21 @@ server.registerTool(
     description:
       'Get the detailed workflow (SKILL.md) and instructions for a specific skill.',
     inputSchema: {
-      skill_id: z
+      skillId: z
         .string()
         .describe('The ID (folder name) of the skill to retrieve.'),
     },
   },
-  async ({ skill_id }) => {
-    const safeSkillId = path.basename(skill_id);
-    const skill = await readSkill(safeSkillId);
+  async ({ skillId }) => {
+    let skill: SkillData | null;
+    try {
+      skill = await readSkill(skillId);
+    } catch {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: `Invalid skill ID: "${skillId}"` }],
+      };
+    }
 
     if (!skill) {
       return {
@@ -123,19 +135,14 @@ server.registerTool(
         content: [
           {
             type: 'text',
-            text: `Skill '${safeSkillId}' not found or missing SKILL.md file.`,
+            text: `Skill '${skillId}' not found or missing SKILL.md file.`,
           },
         ],
       };
     }
 
     return {
-      content: [
-        {
-          type: 'text',
-          text: skill.rawContent,
-        },
-      ],
+      content: [{ type: 'text', text: skill.rawContent }],
     };
   }
 );
@@ -148,9 +155,11 @@ server.registerTool(
       query: z.string().describe('The search term or keywords to look for.'),
       limit: z
         .number()
+        .min(1)
+        .max(50)
         .optional()
         .default(5)
-        .describe('Maximum number of results to return.'),
+        .describe('Maximum number of results to return (1-50).'),
     },
   },
   async ({ query, limit }) => {
@@ -206,6 +215,102 @@ server.registerTool(
         },
       ],
     };
+  }
+);
+
+server.registerTool(
+  'read_skill_file',
+  {
+    description:
+      'Read the contents of a specific file inside a skill\'s folder. Use this when a SKILL.md references an asset such as a script, config, or template (e.g. "run scripts/setup.sh" or "see template.json").',
+    inputSchema: {
+      skillId: z.string().describe('The ID (folder name) of the skill.'),
+      filePath: z
+        .string()
+        .describe(
+          'Relative path to the file within the skill folder, ' +
+            'e.g. "scripts/setup.sh" or "template.json".'
+        ),
+    },
+  },
+  async ({ skillId, filePath }) => {
+    const safeSkillId = path.basename(skillId);
+
+    const skillDir = path.resolve(SKILLS_DIR, safeSkillId);
+    const resolvedFile = path.resolve(skillDir, filePath);
+
+    if (!resolvedFile.startsWith(skillDir + path.sep)) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: 'Access denied: file_path must resolve within the skill folder.',
+          },
+        ],
+      };
+    }
+
+    const ALLOWED_EXTENSIONS = new Set([
+      '.md',
+      '.txt',
+      '.sh',
+      '.bash',
+      '.zsh',
+      '.js',
+      '.ts',
+      '.py',
+      '.rb',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.toml',
+      '.env.example',
+      '.html',
+      '.css',
+      '.sql',
+    ]);
+    const ext = path.extname(resolvedFile).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: `File type '${ext || '(none)'}' is not permitted. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}`,
+          },
+        ],
+      };
+    }
+
+    try {
+      const content = await fs.readFile(resolvedFile, 'utf-8');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Contents of '${safeSkillId}/${filePath}':\n\n${content}`,
+          },
+        ],
+      };
+    } catch (error: unknown) {
+      const isNotFound =
+        typeof error === 'object' &&
+        error !== null &&
+        (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: isNotFound
+              ? `File '${filePath}' not found in skill '${safeSkillId}'.`
+              : `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
   }
 );
 
