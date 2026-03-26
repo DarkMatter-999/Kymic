@@ -48,15 +48,27 @@ export class McpManager {
           inputSchema: z.any(),
           execute: async (args) => {
             const mergedArgs = { ...args, ...context };
-            const result = await client.callTool({
-              name: t.name,
-              arguments: mergedArgs,
-            });
+            const result = await client.callTool(
+              {
+                name: t.name,
+                arguments: mergedArgs,
+              },
+              undefined,
+              {
+                timeout: 600_000,
+              }
+            );
+
             const textContent =
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (result.content as any[])?.find((c) => c.type === 'text')?.text ||
+              (result.content as any[])?.find((c) => c.type === 'text')?.text ??
               '';
-            return textContent;
+
+            if (result.isError) {
+              return { isError: true, text: textContent };
+            }
+
+            return { isError: false, text: textContent };
           },
         });
       }

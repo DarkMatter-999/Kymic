@@ -113,19 +113,19 @@ server.registerTool(
     description:
       'Get the detailed workflow (SKILL.md) and instructions for a specific skill.',
     inputSchema: {
-      skillId: z
+      skill_id: z
         .string()
         .describe('The ID (folder name) of the skill to retrieve.'),
     },
   },
-  async ({ skillId }) => {
+  async ({ skill_id }) => {
     let skill: SkillData | null;
     try {
-      skill = await readSkill(skillId);
+      skill = await readSkill(skill_id);
     } catch {
       return {
         isError: true,
-        content: [{ type: 'text', text: `Invalid skill ID: "${skillId}"` }],
+        content: [{ type: 'text', text: `Invalid skill ID: "${skill_id}"` }],
       };
     }
 
@@ -135,7 +135,7 @@ server.registerTool(
         content: [
           {
             type: 'text',
-            text: `Skill '${skillId}' not found or missing SKILL.md file.`,
+            text: `Skill '${skill_id}' not found or missing SKILL.md file.`,
           },
         ],
       };
@@ -224,8 +224,8 @@ server.registerTool(
     description:
       'Read the contents of a specific file inside a skill\'s folder. Use this when a SKILL.md references an asset such as a script, config, or template (e.g. "run scripts/setup.sh" or "see template.json").',
     inputSchema: {
-      skillId: z.string().describe('The ID (folder name) of the skill.'),
-      filePath: z
+      skill_id: z.string().describe('The ID (folder name) of the skill.'),
+      file_path: z
         .string()
         .describe(
           'Relative path to the file within the skill folder, ' +
@@ -233,11 +233,11 @@ server.registerTool(
         ),
     },
   },
-  async ({ skillId, filePath }) => {
-    const safeSkillId = path.basename(skillId);
+  async ({ skill_id, file_path }) => {
+    const safeSkillId = path.basename(skill_id);
 
     const skillDir = path.resolve(SKILLS_DIR, safeSkillId);
-    const resolvedFile = path.resolve(skillDir, filePath);
+    const resolvedFile = path.resolve(skillDir, file_path);
 
     if (!resolvedFile.startsWith(skillDir + path.sep)) {
       return {
@@ -289,7 +289,7 @@ server.registerTool(
         content: [
           {
             type: 'text',
-            text: `Contents of '${safeSkillId}/${filePath}':\n\n${content}`,
+            text: `Contents of '${safeSkillId}/${file_path}':\n\n${content}`,
           },
         ],
       };
@@ -305,7 +305,7 @@ server.registerTool(
           {
             type: 'text',
             text: isNotFound
-              ? `File '${filePath}' not found in skill '${safeSkillId}'.`
+              ? `File '${file_path}' not found in skill '${safeSkillId}'.`
               : `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
