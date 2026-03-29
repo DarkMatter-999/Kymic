@@ -4,28 +4,30 @@ import type { ServerConfig } from './mcp-manager';
  * MCP Servers configuration
  * Define all MCP servers that should be registered in the application
  */
-export const mcpServersConfig: ServerConfig[] = [
-  {
-    name: 'CodeMode-CLI',
-    path: './mcp-servers/cm-cli-server.ts',
-    version: '1.0.0',
-  },
-  {
-    name: 'Subagent-Server',
-    path: './mcp-servers/subagent-server.ts',
-    version: '1.0.0',
-  },
-  {
-    name: 'Canvas-Server',
-    path: './mcp-servers/canvas-server.ts',
-    version: '1.0.0',
-  },
-  {
-    name: 'Skill-Manager',
-    path: './mcp-servers/skill-manager-server.ts',
-    version: '1.0.0',
-  },
-];
+export const mcpServersConfig: ServerConfig[] = process.env.MCP_SERVERS_CONFIG
+  ? JSON.parse(process.env.MCP_SERVERS_CONFIG)
+  : [
+      {
+        name: 'CodeMode-CLI',
+        path: './mcp-servers/cm-cli-server.ts',
+        version: '1.0.0',
+      },
+      {
+        name: 'Subagent-Server',
+        path: './mcp-servers/subagent-server.ts',
+        version: '1.0.0',
+      },
+      {
+        name: 'Canvas-Server',
+        path: './mcp-servers/canvas-server.ts',
+        version: '1.0.0',
+      },
+      {
+        name: 'Skill-Manager',
+        path: './mcp-servers/skill-manager-server.ts',
+        version: '1.0.0',
+      },
+    ];
 
 /**
  * Get MCP servers configuration excluding specified servers

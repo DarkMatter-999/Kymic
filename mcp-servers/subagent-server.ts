@@ -153,7 +153,10 @@ server.registerTool(
 );
 
 async function main() {
-  const serversConfig = getMcpServersConfig(['Subagent-Server']);
+  const serversConfig = getMcpServersConfig([
+    'Subagent-Server',
+    'Canvas-Server',
+  ]);
   await Promise.all(
     serversConfig.map((serverConfig) =>
       subagentMcpManager.registerServer(serverConfig)
