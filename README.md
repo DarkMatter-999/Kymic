@@ -1,75 +1,86 @@
-# React + TypeScript + Vite
+# Code Mode AI Agents
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Code Mode AI Agents is a autonomous AI orchestration platform that leverages the **Model Context Protocol (MCP)** and an interactive **Code Mode** execution paradigm to build highly capable, secure, and context-efficient AI agents.
 
-Currently, two official plugins are available:
+This project addresses the limitations of traditional "JSON tool calling" by providing agents with a dynamic JavaScript interactive REPL environment. Instead of injecting hundreds of static tool definitions into the model context (which leads to "context rot" and massive token consumption), agents dynamically write, evaluate, and execute scripts to discover tools and manipulate data on demand.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+https://github.com/user-attachments/assets/c0e68e8a-7434-4fb0-8120-629b1261b604
 
-## React Compiler
+## Key Architectural Features
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+- **Code Mode Execution**: Agents are equipped with an interactive programmatic interpreter. By batching multiple operations into a single script, the system dramatically reduces network round-trips and lowers token usage when compared to traditional tool calling.
+- **Orchestrator-Subagent Architecture**: Highly complex tasks are delegated from a primary Orchestrator agent to specialized subagents. Subagents operate in isolated contexts, returning only highly condensed, relevant summaries to the Orchestrator.
+- **Dynamic Skill Acquisition (Skill MCP)**: Instead of loading all potential skills into memory, the agent can actively search for and retrieve expert workflows and methodologies only when needed.
+- **Browser-Native Canvas Interfaces**: A dedicated Canvas MCP allows agents to generate and display interactive structural outputs (data visualizations, architectural diagrams, forms) in the UI.
+- **Sandboxing**:
+  - **Node.js**: Lightweight JavaScript execution runs in highly restricted V8 engine contexts for rapid logical operations without access to system APIs.
+  - **Docker Containerization**: Operations requiring CLI access, networking, or file system modifications are executed within completely isolated Docker environments to protect the host system.
 
-Note: This will impact Vite dev & build performances.
+## Tech Stack
 
-## Expanding the ESLint configuration
+- **Frontend**: React, TypeScript, Vite, Tailwind CSS
+- **Backend**: Node.js, Express, WebSocket (`ws`), Redis (`ioredis`)
+- **AI & Agent Integrations**:
+  - Vercel AI SDK (`ai`, `@ai-sdk/openai`, `@ai-sdk/react`)
+  - Cloudflare Code Mode (`@cloudflare/codemode`)
+  - Model Context Protocol (`@modelcontextprotocol/sdk`)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Getting Started
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Prerequisites
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- Node.js (v24 or compatible)
+- Redis Server (or Docker to run Redis)
+- Docker & Docker Compose (for containerized execution and Sandbox)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-]);
+### Installation
+
+1. Clone the repository and install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Configure environment variables:
+   Copy `.env.example` to `.env` and fill in your AI provider API keys, Redis URL, and MCP server configurations.
+   ```bash
+   cp .env.example .env
+   ```
+
+### Running the Development Environment
+
+#### Using Docker Compose (Recommended)
+
+To easily spin up the entire application stack including Redis, the backend server, and the frontend via Docker:
+
+```bash
+# Development build
+docker-compose -f docker-compose.dev.yml up --build
+
+# Production build
+docker-compose -f docker-compose.prod.yml up --build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+#### Running Locally (Manual)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x';
-import reactDom from 'eslint-plugin-react-dom';
+Alternatively, you can start the React frontend (Vite) and the Express/WebSocket backend simultaneously on your host machine.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-]);
+**Frontend:**
+
+```bash
+npm run dev
+```
+
+**Backend API & WebSocket Server:**
+
+```bash
+npm run dev:server
+```
+
+### Production Build
+
+To build the client for production:
+
+```bash
+npm run build
 ```
