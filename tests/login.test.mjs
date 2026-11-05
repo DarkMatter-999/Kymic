@@ -2,10 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { createServer } from 'node:http';
-import {
-  LoginManager,
-  createLoginRouter,
-} from '../server/gateway/login.ts';
+import { LoginManager, createLoginRouter } from '../server/gateway/login.ts';
 
 const ORIGIN = 'https://agents.example.test';
 let server, base, manager, authed;
@@ -100,7 +97,13 @@ test('requires authentication, an allowed Origin and JSON for state changes', as
   assert.equal((await post('/login', {})).status, 401);
   authed = true;
   assert.equal(
-    (await post('/login', { providerId: 'sub', authType: 'oauth' }, 'https://evil.example')).status,
+    (
+      await post(
+        '/login',
+        { providerId: 'sub', authType: 'oauth' },
+        'https://evil.example'
+      )
+    ).status,
     403
   );
   const noType = await fetch(base + '/login', {
@@ -111,29 +114,47 @@ test('requires authentication, an allowed Origin and JSON for state changes', as
   assert.equal(noType.status, 415);
   assert.equal((await post('/login', { providerId: 'sub' })).status, 400);
   assert.equal(
-    (await post('/login', { providerId: 'ambient', authType: 'api_key' })).status,
+    (await post('/login', { providerId: 'ambient', authType: 'api_key' }))
+      .status,
     409
   );
 });
 
 test('an OAuth flow shows the link, takes a pasted code, and marks the provider configured', async () => {
   await boot(async (i) => {
-    i.notify({ type: 'auth_url', url: 'https://auth.example/authorize?x=1', instructions: 'Open it' });
-    const code = await i.prompt({ type: 'manual_code', message: 'Paste the redirect URL' });
+    i.notify({
+      type: 'auth_url',
+      url: 'https://auth.example/authorize?x=1',
+      instructions: 'Open it',
+    });
+    const code = await i.prompt({
+      type: 'manual_code',
+      message: 'Paste the redirect URL',
+    });
     assert.equal(code, 'the-code');
   });
   const res = await post('/login', { providerId: 'sub', authType: 'oauth' });
   assert.equal(res.status, 201);
   const { loginId } = await res.json();
 
-  const prompt = await until(() => manager.current().events.find((e) => e.type === 'prompt'));
+  const prompt = await until(() =>
+    manager.current().events.find((e) => e.type === 'prompt')
+  );
   assert.equal(prompt.kind, 'manual_code');
   assert.equal(
     manager.current().events.find((e) => e.type === 'auth_url').url,
     'https://auth.example/authorize?x=1'
   );
 
-  assert.equal((await post(`/login/${loginId}/respond`, { promptId: prompt.promptId, value: 'the-code' })).status, 204);
+  assert.equal(
+    (
+      await post(`/login/${loginId}/respond`, {
+        promptId: prompt.promptId,
+        value: 'the-code',
+      })
+    ).status,
+    204
+  );
   await until(() => manager.current().status === 'done');
   assert.ok(eventTypes().includes('prompt_closed'));
   const list = await (await fetch(base + '/providers')).json();
@@ -146,38 +167,101 @@ test('secrets are never echoed back in events', async () => {
     i.notify({ type: 'progress', message: 'verifying' });
     assert.equal(key, 'sk-super-secret');
   });
-  const { loginId } = await (await post('/login', { providerId: 'key', authType: 'api_key' })).json();
-  const prompt = await until(() => manager.current().events.find((e) => e.type === 'prompt'));
-  await post(`/login/${loginId}/respond`, { promptId: prompt.promptId, value: 'sk-super-secret' });
+  const { loginId } = await (
+    await post('/login', { providerId: 'key', authType: 'api_key' })
+  ).json();
+  const prompt = await until(() =>
+    manager.current().events.find((e) => e.type === 'prompt')
+  );
+  await post(`/login/${loginId}/respond`, {
+    promptId: prompt.promptId,
+    value: 'sk-super-secret',
+  });
   await until(() => manager.current().status === 'done');
   assert.ok(!JSON.stringify(manager.current()).includes('sk-super-secret'));
 });
 
 test('stale prompt ids, wrong login ids and unoffered select options are rejected', async () => {
   await boot(async (i) => {
-    await i.prompt({ type: 'select', message: 'Pick', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
+    await i.prompt({
+      type: 'select',
+      message: 'Pick',
+      options: [
+        { id: 'a', label: 'A' },
+        { id: 'b', label: 'B' },
+      ],
+    });
   });
-  const { loginId } = await (await post('/login', { providerId: 'sub', authType: 'oauth' })).json();
-  const prompt = await until(() => manager.current().events.find((e) => e.type === 'prompt'));
-  assert.equal((await post(`/login/${loginId}/respond`, { promptId: 'nope', value: 'a' })).status, 400);
-  assert.equal((await post(`/login/other/respond`, { promptId: prompt.promptId, value: 'a' })).status, 400);
-  assert.equal((await post(`/login/${loginId}/respond`, { promptId: prompt.promptId, value: 'zzz' })).status, 400);
-  assert.equal((await post(`/login/${loginId}/respond`, { promptId: prompt.promptId, value: 'b' })).status, 204);
+  const { loginId } = await (
+    await post('/login', { providerId: 'sub', authType: 'oauth' })
+  ).json();
+  const prompt = await until(() =>
+    manager.current().events.find((e) => e.type === 'prompt')
+  );
+  assert.equal(
+    (await post(`/login/${loginId}/respond`, { promptId: 'nope', value: 'a' }))
+      .status,
+    400
+  );
+  assert.equal(
+    (
+      await post(`/login/other/respond`, {
+        promptId: prompt.promptId,
+        value: 'a',
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await post(`/login/${loginId}/respond`, {
+        promptId: prompt.promptId,
+        value: 'zzz',
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await post(`/login/${loginId}/respond`, {
+        promptId: prompt.promptId,
+        value: 'b',
+      })
+    ).status,
+    204
+  );
   await until(() => manager.current().status === 'done');
   // answering twice fails
-  assert.equal((await post(`/login/${loginId}/respond`, { promptId: prompt.promptId, value: 'b' })).status, 400);
+  assert.equal(
+    (
+      await post(`/login/${loginId}/respond`, {
+        promptId: prompt.promptId,
+        value: 'b',
+      })
+    ).status,
+    400
+  );
 });
 
 test('only http(s) links reach the browser', async () => {
   await boot(async (i) => {
     i.notify({ type: 'auth_url', url: 'javascript:alert(1)' });
-    i.notify({ type: 'info', message: 'see', links: [{ url: 'data:text/html,x' }, { url: 'https://ok.example/', label: 'ok' }] });
+    i.notify({
+      type: 'info',
+      message: 'see',
+      links: [
+        { url: 'data:text/html,x' },
+        { url: 'https://ok.example/', label: 'ok' },
+      ],
+    });
   });
   await post('/login', { providerId: 'sub', authType: 'oauth' });
   await until(() => manager.current().status === 'done');
   const events = manager.current().events;
   assert.ok(!events.some((e) => e.type === 'auth_url'));
-  assert.deepEqual(events.find((e) => e.type === 'info').links, [{ url: 'https://ok.example/', label: 'ok' }]);
+  assert.deepEqual(events.find((e) => e.type === 'info').links, [
+    { url: 'https://ok.example/', label: 'ok' },
+  ]);
 });
 
 test('one login at a time; cancel aborts the flow and frees the slot', async () => {
@@ -186,12 +270,20 @@ test('one login at a time; cancel aborts the flow and frees the slot', async () 
     i.signal.addEventListener('abort', () => (aborted = true));
     await i.prompt({ type: 'text', message: 'wait' });
   });
-  const { loginId } = await (await post('/login', { providerId: 'sub', authType: 'oauth' })).json();
-  assert.equal((await post('/login', { providerId: 'key', authType: 'api_key' })).status, 409);
+  const { loginId } = await (
+    await post('/login', { providerId: 'sub', authType: 'oauth' })
+  ).json();
+  assert.equal(
+    (await post('/login', { providerId: 'key', authType: 'api_key' })).status,
+    409
+  );
   assert.equal((await post(`/login/${loginId}/cancel`, {})).status, 204);
   assert.equal(manager.current().status, 'cancelled');
   assert.ok(aborted);
-  assert.equal((await post('/login', { providerId: 'key', authType: 'api_key' })).status, 201);
+  assert.equal(
+    (await post('/login', { providerId: 'key', authType: 'api_key' })).status,
+    201
+  );
 });
 
 test('a failing provider reports a failure and leaves it unconfigured', async () => {
@@ -206,9 +298,12 @@ test('a failing provider reports a failure and leaves it unconfigured', async ()
 });
 
 test('prompts time out instead of hanging forever', async () => {
-  await boot(async (i) => {
-    await i.prompt({ type: 'text', message: 'never answered' });
-  }, { promptTimeoutMs: 50 });
+  await boot(
+    async (i) => {
+      await i.prompt({ type: 'text', message: 'never answered' });
+    },
+    { promptTimeoutMs: 50 }
+  );
   await post('/login', { providerId: 'sub', authType: 'oauth' });
   await until(() => manager.current().status === 'failed');
   assert.match(manager.current().events.at(-1).message, /Timed out/);
@@ -219,12 +314,20 @@ test('the event stream replays history then ends when the login does', async () 
     i.notify({ type: 'progress', message: 'step 1' });
     await new Promise((r) => setTimeout(r, 100));
   });
-  const { loginId } = await (await post('/login', { providerId: 'sub', authType: 'oauth' })).json();
+  const { loginId } = await (
+    await post('/login', { providerId: 'sub', authType: 'oauth' })
+  ).json();
   const res = await fetch(`${base}/login/${loginId}/events`);
   assert.match(res.headers.get('content-type'), /text\/event-stream/);
   const body = await res.text(); // resolves because the server ends the stream
-  const events = body.split('\n\n').filter((c) => c.startsWith('data: ')).map((c) => JSON.parse(c.slice(6)));
-  assert.deepEqual(events.map((e) => e.type), ['progress', 'done']);
+  const events = body
+    .split('\n\n')
+    .filter((c) => c.startsWith('data: '))
+    .map((c) => JSON.parse(c.slice(6)));
+  assert.deepEqual(
+    events.map((e) => e.type),
+    ['progress', 'done']
+  );
 });
 
 test('logout removes the credential and is refused mid-login', async () => {
@@ -232,6 +335,11 @@ test('logout removes the credential and is refused mid-login', async () => {
   await post('/login', { providerId: 'sub', authType: 'oauth' });
   await until(() => manager.current().status === 'done');
   assert.equal((await post('/providers/sub/logout', {})).status, 204);
-  assert.equal((await (await fetch(base + '/providers')).json()).find((p) => p.id === 'sub').configured, false);
+  assert.equal(
+    (await (await fetch(base + '/providers')).json()).find(
+      (p) => p.id === 'sub'
+    ).configured,
+    false
+  );
   assert.equal((await post('/providers/nope/logout', {})).status, 400);
 });

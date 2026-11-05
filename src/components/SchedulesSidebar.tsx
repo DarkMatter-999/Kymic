@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, X, Trash2 } from 'lucide-react';
 import {
+  DAY_NAMES,
+  describeSchedule,
   schedulesApi,
   type RunView,
   type ScheduleView,
@@ -28,6 +30,9 @@ export function SchedulesSidebar({
   const [runs, setRuns] = useState<Record<string, RunView[]>>({});
   const [prompt, setPrompt] = useState('');
   const [minutes, setMinutes] = useState(60);
+  const [kind, setKind] = useState<'interval' | 'daily' | 'weekly'>('interval');
+  const [timeOfDay, setTimeOfDay] = useState('09:00');
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -45,7 +50,6 @@ export function SchedulesSidebar({
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
     return () => clearInterval(timer);
@@ -65,8 +69,12 @@ export function SchedulesSidebar({
       await schedulesApi.create({
         conversationId,
         prompt: prompt.trim(),
-        everyMs: minutes * 60_000,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        kind,
+        ...(kind === 'interval'
+          ? { everyMs: minutes * 60_000 }
+          : { timeOfDay }),
+        ...(kind === 'weekly' ? { weekdays } : {}),
       });
       setPrompt('');
     });
@@ -97,22 +105,72 @@ export function SchedulesSidebar({
               rows={3}
               className="resize-none input-field rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
             />
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              Every
-              <input
-                type="number"
-                min={1}
-                value={minutes}
-                onChange={(e) =>
-                  setMinutes(Math.max(1, Number(e.target.value)))
-                }
-                className="w-20 input-field rounded-lg px-2 py-1 text-sm text-zinc-100 focus:outline-none"
-              />
-              minutes
-            </label>
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value as typeof kind)}
+              className="input-field rounded-lg px-2 py-1 text-sm text-zinc-100 focus:outline-none"
+              aria-label="Repeat"
+            >
+              <option value="interval">Every N minutes</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+            {kind === 'interval' ? (
+              <label className="flex items-center gap-2 text-xs text-zinc-400">
+                Every
+                <input
+                  type="number"
+                  min={1}
+                  value={minutes}
+                  onChange={(e) =>
+                    setMinutes(Math.max(1, Number(e.target.value)))
+                  }
+                  className="w-20 input-field rounded-lg px-2 py-1 text-sm text-zinc-100 focus:outline-none"
+                />
+                minutes
+              </label>
+            ) : (
+              <label className="flex items-center gap-2 text-xs text-zinc-400">
+                At
+                <input
+                  type="time"
+                  value={timeOfDay}
+                  onChange={(e) => setTimeOfDay(e.target.value)}
+                  className="input-field rounded-lg px-2 py-1 text-sm text-zinc-100 focus:outline-none"
+                />
+                {Intl.DateTimeFormat().resolvedOptions().timeZone}
+              </label>
+            )}
+            {kind === 'weekly' && (
+              <div className="flex gap-1" role="group" aria-label="Days">
+                {DAY_NAMES.map((name, day) => (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-pressed={weekdays.includes(day)}
+                    onClick={() =>
+                      setWeekdays((prev) =>
+                        prev.includes(day)
+                          ? prev.filter((d) => d !== day)
+                          : [...prev, day]
+                      )
+                    }
+                    className={`px-2 py-1 rounded text-xs ${
+                      weekdays.includes(day)
+                        ? 'bg-teal-500/20 text-teal-400'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               onClick={create}
-              disabled={!prompt.trim()}
+              disabled={
+                !prompt.trim() || (kind === 'weekly' && weekdays.length === 0)
+              }
               className="send-button rounded-lg px-3 py-2 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
             >
               Create schedule
@@ -150,9 +208,9 @@ export function SchedulesSidebar({
               </div>
               <div className="flex items-center justify-between text-xs text-zinc-500">
                 <span>
-                  Every {Math.round(s.everyMs / 60_000)} min · next{' '}
+                  {describeSchedule(s)} · next{' '}
                   {s.enabled
-                    ? new Date(s.nextOccurrence).toLocaleTimeString()
+                    ? new Date(s.nextOccurrence).toLocaleString()
                     : 'paused'}
                 </span>
                 <button

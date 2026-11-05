@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { ServerEvent } from '../gateway/protocol.js';
+import {
+  nextOccurrenceAfter,
+  parseTimeOfDay,
+  type RecurrenceKind,
+} from './recurrence.js';
 
 /** The slice of ConversationManager the scheduler needs. */
 export interface RunExecutor {
@@ -27,7 +32,13 @@ export interface Schedule {
   conversationId: string;
   prompt: string;
   timezone: string;
+  kind: RecurrenceKind;
+  /** Interval schedules only; 0 for calendar schedules. */
   everyMs: number;
+  /** Calendar schedules: local "HH:MM" in `timezone`. */
+  timeOfDay: string | null;
+  /** Weekly schedules: 0 = Sunday … 6 = Saturday. */
+  weekdays: number[];
   enabled: boolean;
   nextOccurrence: number;
 }
@@ -59,9 +70,16 @@ export interface SchedulerOptions {
 export interface CreateSchedule {
   conversationId: string;
   prompt: string;
-  everyMs: number;
   timezone: string;
+  /** Defaults to "interval". */
+  kind?: RecurrenceKind;
+  everyMs?: number;
+  timeOfDay?: string;
+  weekdays?: number[];
 }
+
+/** Longest catch-up walk when finding the latest due calendar occurrence. */
+const MAX_CATCH_UP_STEPS = 10_000;
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 
@@ -77,8 +95,9 @@ function invalid(reason: string): never {
  * occurrence has at most one durable launch record. Ambiguous crashes become
  * `interrupted` and are never re-run automatically.
  *
- * Spike scope: fixed-interval recurrence. Calendar/DST-aware recurrence is
- * Task 7; `timezone` is validated and stored but does not yet affect timing.
+ * Recurrence is either a fixed interval or a calendar rule (daily or weekly at a
+ * local time) evaluated in the schedule's time zone with explicit DST rules; see
+ * recurrence.ts. Missed occurrences are skipped, never run late in a burst.
  */
 export class Scheduler {
   private readonly db: DatabaseSync;
@@ -110,7 +129,10 @@ export class Scheduler {
         timezone TEXT NOT NULL,
         every_ms INTEGER NOT NULL,
         enabled INTEGER NOT NULL,
-        next_occurrence INTEGER NOT NULL
+        next_occurrence INTEGER NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'interval',
+        time_of_day TEXT,
+        weekdays TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS runs (
         occurrence_id TEXT PRIMARY KEY,
@@ -125,7 +147,43 @@ export class Scheduler {
       );
       CREATE INDEX IF NOT EXISTS runs_schedule ON runs (schedule_id, due_at);
     `);
+    this.migrate();
     if (options.recoverOnStart !== false) this.recover();
+  }
+
+  /** Databases from before calendar recurrence lack three columns; add them in place. */
+  private migrate(): void {
+    const columns = new Set(
+      (
+        this.db.prepare('PRAGMA table_info(schedules)').all() as {
+          name: string;
+        }[]
+      ).map((c) => c.name)
+    );
+    if (!columns.has('kind'))
+      this.db.exec(
+        "ALTER TABLE schedules ADD COLUMN kind TEXT NOT NULL DEFAULT 'interval'"
+      );
+    if (!columns.has('time_of_day'))
+      this.db.exec('ALTER TABLE schedules ADD COLUMN time_of_day TEXT');
+    if (!columns.has('weekdays'))
+      this.db.exec(
+        "ALTER TABLE schedules ADD COLUMN weekdays TEXT NOT NULL DEFAULT ''"
+      );
+  }
+
+  /** First occurrence strictly after `after`. */
+  private stepAfter(schedule: Schedule, after: number): number {
+    if (schedule.kind === 'interval') return after + schedule.everyMs;
+    return nextOccurrenceAfter(
+      {
+        kind: schedule.kind,
+        timezone: schedule.timezone,
+        timeOfDay: schedule.timeOfDay ?? '00:00',
+        weekdays: schedule.weekdays,
+      },
+      after
+    );
   }
 
   create(input: CreateSchedule): Schedule {
@@ -137,16 +195,42 @@ export class Scheduler {
     ) {
       invalid('prompt');
     }
-    if (
-      !Number.isInteger(input.everyMs) ||
-      input.everyMs < this.minIntervalMs
-    ) {
-      invalid('interval');
-    }
+    const kind = input.kind ?? 'interval';
+    if (kind !== 'interval' && kind !== 'daily' && kind !== 'weekly')
+      invalid('kind');
     try {
       new Intl.DateTimeFormat('en', { timeZone: input.timezone });
     } catch {
       invalid('timezone');
+    }
+    let everyMs = 0;
+    let timeOfDay: string | null = null;
+    let weekdays: number[] = [];
+    if (kind === 'interval') {
+      if (
+        typeof input.everyMs !== 'number' ||
+        !Number.isInteger(input.everyMs) ||
+        input.everyMs < this.minIntervalMs
+      )
+        invalid('interval');
+      everyMs = input.everyMs;
+    } else {
+      if (
+        typeof input.timeOfDay !== 'string' ||
+        !parseTimeOfDay(input.timeOfDay)
+      )
+        invalid('timeOfDay');
+      timeOfDay = input.timeOfDay;
+      if (kind === 'weekly') {
+        const days = input.weekdays;
+        if (
+          !Array.isArray(days) ||
+          days.length === 0 ||
+          !days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+        )
+          invalid('weekdays');
+        weekdays = [...new Set(days)].sort();
+      }
     }
     const count = (
       this.db.prepare('SELECT COUNT(*) AS c FROM schedules').get() as {
@@ -159,19 +243,30 @@ export class Scheduler {
       conversationId: input.conversationId,
       prompt: input.prompt,
       timezone: input.timezone,
-      everyMs: input.everyMs,
+      kind,
+      everyMs,
+      timeOfDay,
+      weekdays,
       enabled: true,
-      nextOccurrence: this.now() + input.everyMs,
+      nextOccurrence: 0,
     };
+    schedule.nextOccurrence = this.stepAfter(schedule, this.now());
+    if (kind === 'interval') schedule.nextOccurrence = this.now() + everyMs;
     this.db
-      .prepare('INSERT INTO schedules VALUES (?, ?, ?, ?, ?, 1, ?)')
+      .prepare(
+        `INSERT INTO schedules (id, conversation_id, prompt, timezone, every_ms, enabled, next_occurrence, kind, time_of_day, weekdays)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+      )
       .run(
         schedule.id,
         schedule.conversationId,
         schedule.prompt,
         schedule.timezone,
         schedule.everyMs,
-        schedule.nextOccurrence
+        schedule.nextOccurrence,
+        kind,
+        timeOfDay,
+        weekdays.join(',')
       );
     return schedule;
   }
@@ -205,9 +300,12 @@ export class Scheduler {
     let next = schedule.nextOccurrence;
     const now = this.now();
     if (enabled && next <= now) {
-      // Resume on the original grid at the next future occurrence; never catch up.
-      next +=
-        (Math.floor((now - next) / schedule.everyMs) + 1) * schedule.everyMs;
+      // Resume at the next future occurrence on the original grid; never catch up.
+      next =
+        schedule.kind === 'interval'
+          ? next +
+            (Math.floor((now - next) / schedule.everyMs) + 1) * schedule.everyMs
+          : this.stepAfter(schedule, now);
     }
     this.db
       .prepare(
@@ -275,9 +373,22 @@ export class Scheduler {
         this.db.exec('ROLLBACK');
         return null;
       }
-      const every = schedule.everyMs;
-      const periods = Math.floor((now - schedule.nextOccurrence) / every);
-      const latest = schedule.nextOccurrence + periods * every;
+      // `latest` is the newest occurrence that is due; `periods` older ones were missed.
+      let latest = schedule.nextOccurrence;
+      let periods = 0;
+      if (schedule.kind === 'interval') {
+        periods = Math.floor((now - latest) / schedule.everyMs);
+        latest += periods * schedule.everyMs;
+      } else {
+        for (
+          let following = this.stepAfter(schedule, latest);
+          following <= now && periods < MAX_CATCH_UP_STEPS;
+          following = this.stepAfter(schedule, latest)
+        ) {
+          latest = following;
+          periods++;
+        }
+      }
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO runs (occurrence_id, schedule_id, conversation_id, due_at, status, started_at, error)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -320,7 +431,7 @@ export class Scheduler {
       }
       this.db
         .prepare('UPDATE schedules SET next_occurrence = ? WHERE id = ?')
-        .run(latest + every, id);
+        .run(this.stepAfter(schedule, latest), id);
       this.db.exec('COMMIT');
       return launch ? { schedule, occurrenceId: launch } : null;
     } catch (error) {
@@ -395,7 +506,13 @@ function toSchedule(row: Row): Schedule {
     conversationId: String(row.conversation_id),
     prompt: String(row.prompt),
     timezone: String(row.timezone),
+    kind: (row.kind as RecurrenceKind) ?? 'interval',
     everyMs: Number(row.every_ms),
+    timeOfDay: row.time_of_day === null ? null : String(row.time_of_day),
+    weekdays: String(row.weekdays ?? '')
+      .split(',')
+      .filter(Boolean)
+      .map(Number),
     enabled: row.enabled === 1,
     nextOccurrence: Number(row.next_occurrence),
   };

@@ -63,8 +63,11 @@ export function createScheduleRouter(
       const schedule = scheduler.create({
         conversationId: body.conversationId as string,
         prompt: body.prompt as string,
-        everyMs: body.everyMs as number,
         timezone: body.timezone as string,
+        kind: (body.kind ?? undefined) as 'interval' | 'daily' | 'weekly',
+        everyMs: body.everyMs as number,
+        timeOfDay: body.timeOfDay as string,
+        weekdays: body.weekdays as number[],
       });
       res.status(201).json(schedule);
     } catch (error) {

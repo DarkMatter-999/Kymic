@@ -3,7 +3,10 @@ export interface ScheduleView {
   conversationId: string;
   prompt: string;
   timezone: string;
+  kind: 'interval' | 'daily' | 'weekly';
   everyMs: number;
+  timeOfDay: string | null;
+  weekdays: number[];
   enabled: boolean;
   nextOccurrence: number;
 }
@@ -40,11 +43,26 @@ export const schedulesApi = {
   create: (input: {
     conversationId: string;
     prompt: string;
-    everyMs: number;
     timezone: string;
+    kind: 'interval' | 'daily' | 'weekly';
+    everyMs?: number;
+    timeOfDay?: string;
+    weekdays?: number[];
   }) => request<ScheduleView>('', { method: 'POST', body: input }),
   setEnabled: (id: string, enabled: boolean) =>
     request<void>(`/${id}/enabled`, { method: 'POST', body: { enabled } }),
   remove: (id: string) => request<void>(`/${id}`, { method: 'DELETE' }),
   runs: (id: string) => request<RunView[]>(`/${id}/runs`),
 };
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export { DAY_NAMES };
+
+export function describeSchedule(s: ScheduleView): string {
+  if (s.kind === 'interval')
+    return `Every ${Math.round(s.everyMs / 60_000)} min`;
+  const at = `${s.timeOfDay} ${s.timezone}`;
+  return s.kind === 'daily'
+    ? `Daily at ${at}`
+    : `${s.weekdays.map((d) => DAY_NAMES[d]).join(', ')} at ${at}`;
+}

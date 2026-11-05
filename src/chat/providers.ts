@@ -48,10 +48,7 @@ export const providersApi = {
   logout: (providerId: string) =>
     request<void>(`/providers/${providerId}/logout`, { method: 'POST' }),
   /** Replays the login so far, then streams; the server closes the stream when it ends. */
-  watch(
-    loginId: string,
-    onEvent: (event: LoginEvent) => void
-  ): () => void {
+  watch(loginId: string, onEvent: (event: LoginEvent) => void): () => void {
     const source = new EventSource(`/api/pi/login/${loginId}/events`);
     source.onmessage = (message) => {
       const event = JSON.parse(message.data) as LoginEvent;
@@ -85,7 +82,10 @@ export function foldLoginEvents(events: LoginEvent[]): LoginView {
     if (e.type === 'auth_url')
       view.link = { url: e.url, instructions: e.instructions };
     else if (e.type === 'device_code')
-      view.device = { userCode: e.userCode, verificationUri: e.verificationUri };
+      view.device = {
+        userCode: e.userCode,
+        verificationUri: e.verificationUri,
+      };
     else if (e.type === 'info' || e.type === 'progress')
       view.notes = [...view.notes, e.message].slice(-5);
     else if (e.type === 'prompt') view.prompt = e;
