@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   parseClientCommand,
   projectPiEvent,
+  visibleMessages,
 } from '../server/gateway/protocol.ts';
 
 test('parses valid client commands', () => {
@@ -178,4 +179,36 @@ test('projects Pi events to the versioned schema', () => {
   assert.equal(p({ type: 'extension_error', error: 'boom' })[0].type, 'error');
   assert.deepEqual(p({ type: 'agent_end', messages: [] }), []); // agent_end is not final idle
   assert.deepEqual(p({ type: 'something_new' }), []);
+});
+
+test('system and unknown-role messages never reach the browser', () => {
+  assert.deepEqual(
+    projectPiEvent('c-1', {
+      type: 'message_end',
+      message: { role: 'system', content: 'secret prompt' },
+    }),
+    []
+  );
+  assert.deepEqual(
+    projectPiEvent('c-1', {
+      type: 'message_end',
+      message: { role: 'bashExecution', command: 'ls' },
+    }),
+    []
+  );
+  assert.equal(
+    projectPiEvent('c-1', {
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 't' },
+    }).length,
+    1
+  );
+  assert.deepEqual(
+    visibleMessages([
+      { role: 'system', content: 'x' },
+      { role: 'user', content: 'hi' },
+      { role: 'custom' },
+    ]),
+    [{ role: 'user', content: 'hi' }]
+  );
 });

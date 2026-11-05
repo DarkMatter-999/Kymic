@@ -66,6 +66,17 @@ export function parseClientCommand(raw: unknown): ClientCommand {
 
 type Obj = Record<string, unknown>;
 
+const VISIBLE_ROLES = new Set(['user', 'assistant', 'toolResult']);
+
+function isVisibleMessage(message: unknown): boolean {
+  return VISIBLE_ROLES.has((message as { role?: string } | null)?.role ?? '');
+}
+
+/** Drop system prompts and internal roles before anything leaves the gateway. */
+export function visibleMessages(messages: unknown[]): unknown[] {
+  return messages.filter(isVisibleMessage);
+}
+
 /** Map one Pi event to zero or more client events. `agent_end` is deliberately not final idle. */
 export function projectPiEvent(
   conversationId: string,
@@ -98,7 +109,9 @@ export function projectPiEvent(
       return [];
     }
     case 'message_end':
-      return [{ ...base, type: 'message', message: e.message }];
+      return isVisibleMessage(e.message)
+        ? [{ ...base, type: 'message', message: e.message }]
+        : [];
     case 'tool_execution_start':
       return [
         {

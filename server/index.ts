@@ -77,7 +77,18 @@ app.post('/api/chat', async (req, res) => {
 
 // WebSocket Setup
 // Legacy canvas/subagent socket stays on '/'; the Pi gateway owns '/gateway'.
-const wss = new WebSocketServer({ server, path: '/' });
+// ws's own `path` option would 400 every other path, so route upgrades by hand.
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  const pathname = new URL(req.url ?? '', 'http://localhost').pathname;
+  if (pathname === '/') {
+    wss.handleUpgrade(req, socket, head, (ws) =>
+      wss.emit('connection', ws, req)
+    );
+  } else if (pathname !== '/gateway') {
+    socket.destroy();
+  }
+});
 const wsClients = new Map<string, Set<WebSocket>>();
 
 wss.on('connection', (ws, req) => {

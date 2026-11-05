@@ -2,7 +2,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, readdir, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative } from 'node:path';
 import { WorkerLauncher } from '../server/workers/launcher.ts';
 import { startFakeModel } from './fixtures/fake-model.mjs';
 
@@ -145,3 +145,19 @@ test(
     assert.equal(p.gid, 12345);
   }
 );
+
+test('relative configuration paths are resolved against the gateway cwd, not the worker cwd', async () => {
+  make({
+    piCli: 'tests/fixtures/fake-pi.mjs',
+    skills: ['skills/spike/SKILL.md'],
+    workspaceRoot: relative(process.cwd(), join(root, 'ws2')),
+    sessionRoot: relative(process.cwd(), join(root, 'sessions2')),
+    agentHome: relative(process.cwd(), join(root, 'home2')),
+  });
+  const worker = await launcher.start('conv-rel');
+  const probe = await worker.rpc.command('probe');
+  assert.equal(probe.cwd, join(root, 'ws2', 'conv-rel'));
+  const skillArg = probe.argv[probe.argv.indexOf('--skill') + 1];
+  assert.equal(skillArg, resolve('skills/spike/SKILL.md'));
+  assert.equal(probe.env.HOME, join(root, 'home2'));
+});

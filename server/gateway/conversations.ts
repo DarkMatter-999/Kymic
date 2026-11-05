@@ -2,6 +2,7 @@ import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
 import {
   PROTOCOL_VERSION,
   projectPiEvent,
+  visibleMessages,
   type ServerEvent,
 } from './protocol.js';
 
@@ -60,6 +61,11 @@ export class ConversationManager {
         this.setRunning(conversationId, false);
     } catch (error) {
       this.setRunning(conversationId, false);
+      // A generic "transport closed" hides why the worker died; include its stderr.
+      const detail = worker.stderrTail().trim().slice(-400);
+      if (detail && error instanceof Error) {
+        throw new Error(`${error.message}: ${detail}`, { cause: error });
+      }
       throw error;
     }
   }
@@ -80,7 +86,7 @@ export class ConversationManager {
     };
     return {
       running: this.running.has(conversationId),
-      messages: data.messages,
+      messages: visibleMessages(data.messages),
     };
   }
 

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { RpcClient } from '../gateway/rpc.js';
 import { workspaceForConversation } from './storage.js';
 
@@ -49,7 +49,18 @@ export class WorkerLauncher {
   private readonly config: LauncherConfig;
 
   constructor(config: LauncherConfig) {
-    this.config = config;
+    // Workers run with their workspace as cwd, so every path must be absolute.
+    this.config = {
+      ...config,
+      piCli: resolve(config.piCli),
+      workspaceRoot: resolve(config.workspaceRoot),
+      sessionRoot: resolve(config.sessionRoot),
+      agentHome: resolve(config.agentHome),
+      skills: config.skills.map((skill) => resolve(skill)),
+      extensions: config.extensions?.map((e) =>
+        e.startsWith('builtin:') ? e : resolve(e)
+      ),
+    };
   }
 
   start(conversationId: string): Promise<Worker> {

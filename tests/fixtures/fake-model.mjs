@@ -2,7 +2,10 @@
 // Each queued turn is { text } or { toolCalls: [{ name, arguments }] }. Requests are recorded.
 import { createServer } from 'node:http';
 
-export async function startFakeModel(script = []) {
+export async function startFakeModel(
+  script = [],
+  { fallback, port: listenPort = 0 } = {}
+) {
   const queue = [...script];
   const requests = [];
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,7 +21,8 @@ export async function startFakeModel(script = []) {
       }
       const parsed = JSON.parse(body);
       requests.push(parsed);
-      const turn = queue.shift() ?? { text: 'fake-model: script exhausted' };
+      const turn = queue.shift() ??
+        fallback?.(parsed) ?? { text: 'fake-model: script exhausted' };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const send = (delta, finish = null) =>
         res.write(
@@ -62,7 +66,9 @@ export async function startFakeModel(script = []) {
       res.end('data: [DONE]\n\n');
     });
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) =>
+    server.listen(listenPort, '127.0.0.1', resolve)
+  );
   const { port } = server.address();
   return {
     url: `http://127.0.0.1:${port}/v1`,
