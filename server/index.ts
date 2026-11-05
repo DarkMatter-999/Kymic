@@ -15,9 +15,11 @@ import { getMcpServersConfig } from './mcp-servers-config';
 import { ConversationManager } from './gateway/conversations';
 import { attachGateway } from './gateway/ws';
 import { Auth } from './gateway/auth';
+import { LoginManager, createLoginRouter } from './gateway/login';
 import { Scheduler } from './scheduler/scheduler';
 import { createScheduleRouter } from './scheduler/http';
 import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 dotenv.config();
 
@@ -271,7 +273,24 @@ if (gatewayEnabled) {
       authenticate,
     })
   );
+
+  // Provider sign-in through Pi's own SDK; credentials land in the agent home's auth.json.
+  const agentHome = process.env.PI_AGENT_HOME ?? `${dataRoot}/agent-home`;
+  mkdirSync(agentHome, { recursive: true, mode: 0o700 });
+  const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
+  const loginManager = new LoginManager(
+    await ModelRuntime.create({
+      authPath: `${resolve(agentHome)}/auth.json`,
+      modelsPath: null,
+      refreshOnCreate: false,
+    })
+  );
+  app.use(
+    '/api/pi',
+    createLoginRouter({ login: loginManager, allowedOrigins, authenticate })
+  );
   const shutdown = () => {
+    loginManager.close();
     scheduler.close();
     auth?.close();
     void gatewayManager.stopAll().finally(() => process.exit(0));

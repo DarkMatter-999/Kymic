@@ -298,41 +298,116 @@ test('notices and unsupported UI methods are surfaced and dismissible', () => {
 });
 
 test('entry IDs from the authoritative snapshot reach user and assistant messages', () => {
-  const s = reduce(initialState, ev('snapshot', {
-    running: false, dialogs: [], leafId: 'a1',
-    messages: [
-      { role: 'user', content: [{ type: 'text', text: 'q' }], entryId: 'u1' },
-      { role: 'assistant', content: [{ type: 'text', text: 'a' }], entryId: 'a1', stopReason: 'stop' },
-    ],
-  }));
-  assert.deepEqual(s.messages.map((m) => [m.role, m.entryId]), [['user', 'u1'], ['assistant', 'a1']]);
+  const s = reduce(
+    initialState,
+    ev('snapshot', {
+      running: false,
+      dialogs: [],
+      leafId: 'a1',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }], entryId: 'u1' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'a' }],
+          entryId: 'a1',
+          stopReason: 'stop',
+        },
+      ],
+    })
+  );
+  assert.deepEqual(
+    s.messages.map((m) => [m.role, m.entryId]),
+    [
+      ['user', 'u1'],
+      ['assistant', 'a1'],
+    ]
+  );
 });
 
 test('live messages have no entry ID until the post-turn snapshot supplies them', () => {
   let s = run([
     ev('message', { message: { role: 'user', content: 'q' } }),
-    ev('message', { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }], stopReason: 'stop' } }),
+    ev('message', {
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'a' }],
+        stopReason: 'stop',
+      },
+    }),
   ]);
-  assert.deepEqual(s.messages.map((m) => m.entryId), [undefined, undefined]);
-  s = reduce(s, ev('snapshot', {
-    running: false, dialogs: [], leafId: 'a1',
-    messages: [
-      { role: 'user', content: 'q', entryId: 'u1' },
-      { role: 'assistant', content: [{ type: 'text', text: 'a' }], entryId: 'a1', stopReason: 'stop' },
-    ],
-  }));
+  assert.deepEqual(
+    s.messages.map((m) => m.entryId),
+    [undefined, undefined]
+  );
+  s = reduce(
+    s,
+    ev('snapshot', {
+      running: false,
+      dialogs: [],
+      leafId: 'a1',
+      messages: [
+        { role: 'user', content: 'q', entryId: 'u1' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'a' }],
+          entryId: 'a1',
+          stopReason: 'stop',
+        },
+      ],
+    })
+  );
   assert.equal(s.messages.length, 2);
-  assert.deepEqual(s.messages.map((m) => m.entryId), ['u1', 'a1']);
+  assert.deepEqual(
+    s.messages.map((m) => m.entryId),
+    ['u1', 'a1']
+  );
 });
 
 test('a snapshot from another branch replaces the displayed history entirely', () => {
-  const first = reduce(initialState, ev('snapshot', { running: false, dialogs: [], leafId: 'a2', messages: [
-    { role: 'user', content: 'q1', entryId: 'u1' }, { role: 'assistant', content: [{ type: 'text', text: 'a1' }], entryId: 'a1', stopReason: 'stop' },
-    { role: 'user', content: 'q2', entryId: 'u2' }, { role: 'assistant', content: [{ type: 'text', text: 'a2' }], entryId: 'a2', stopReason: 'stop' },
-  ] }));
-  const forked = reduce(first, ev('snapshot', { running: true, dialogs: [], leafId: 'a1', messages: [
-    { role: 'user', content: 'q1', entryId: 'u1' }, { role: 'assistant', content: [{ type: 'text', text: 'a1' }], entryId: 'a1', stopReason: 'stop' },
-  ] }));
-  assert.deepEqual(forked.messages.map((m) => m.entryId), ['u1', 'a1']);
+  const first = reduce(
+    initialState,
+    ev('snapshot', {
+      running: false,
+      dialogs: [],
+      leafId: 'a2',
+      messages: [
+        { role: 'user', content: 'q1', entryId: 'u1' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'a1' }],
+          entryId: 'a1',
+          stopReason: 'stop',
+        },
+        { role: 'user', content: 'q2', entryId: 'u2' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'a2' }],
+          entryId: 'a2',
+          stopReason: 'stop',
+        },
+      ],
+    })
+  );
+  const forked = reduce(
+    first,
+    ev('snapshot', {
+      running: true,
+      dialogs: [],
+      leafId: 'a1',
+      messages: [
+        { role: 'user', content: 'q1', entryId: 'u1' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'a1' }],
+          entryId: 'a1',
+          stopReason: 'stop',
+        },
+      ],
+    })
+  );
+  assert.deepEqual(
+    forked.messages.map((m) => m.entryId),
+    ['u1', 'a1']
+  );
   assert.equal(forked.running, true);
 });

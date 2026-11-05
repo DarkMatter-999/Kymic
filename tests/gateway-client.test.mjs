@@ -186,14 +186,33 @@ test('respondDialog sends exactly the validated shape and reports whether it was
 
 test('edit and regenerate send only the entry ID (and new text for edit)', async () => {
   const sent = [];
-  const socket = { readyState: 1, send: (d) => sent.push(JSON.parse(d)), close() {}, onopen: null, onmessage: null, onclose: null, onerror: null };
-  const c = new GatewayClient({ url: 'ws://x', conversationId: 'c1', onEvent() {}, createSocket: () => socket });
+  const socket = {
+    readyState: 1,
+    send: (d) => sent.push(JSON.parse(d)),
+    close() {},
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+  };
+  const c = new GatewayClient({
+    url: 'ws://x',
+    conversationId: 'c1',
+    onEvent() {},
+    createSocket: () => socket,
+  });
   c.connect();
   socket.onopen({});
   assert.equal(c.edit('u1', 'new words'), true);
   assert.equal(c.regenerate('u1'), true);
   assert.deepEqual(sent.slice(1), [
-    { v: 1, conversationId: 'c1', type: 'edit', entryId: 'u1', text: 'new words' },
+    {
+      v: 1,
+      conversationId: 'c1',
+      type: 'edit',
+      entryId: 'u1',
+      text: 'new words',
+    },
     { v: 1, conversationId: 'c1', type: 'regenerate', entryId: 'u1' },
   ]);
   socket.readyState = 3;

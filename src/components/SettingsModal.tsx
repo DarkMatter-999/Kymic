@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
+import { ProvidersPanel } from './ProvidersPanel';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -38,7 +39,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Modal Content */}
-        <div className="px-6 py-6">{/* Empty for now */}</div>
+        <div className="px-6 py-6">
+          <ProvidersPanel />
+        </div>
 
         {/* Modal Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
