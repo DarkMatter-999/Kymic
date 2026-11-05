@@ -36,7 +36,6 @@ services:
       - NODE_ENV=development
       - HOST=0.0.0.0
       - PORT=3000
-      - PI_GATEWAY=1
       - PI_GATEWAY_INSECURE_DEV=${PI_GATEWAY_INSECURE_DEV:-1}
       - GATEWAY_PASSWORD=${GATEWAY_PASSWORD:-}
       - PI_DATA_DIR=/data/gateway

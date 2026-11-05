@@ -21,7 +21,6 @@ FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    PI_GATEWAY=1 \
     STATIC_DIR=/app/dist \
     PI_DATA_DIR=/data/gateway \
     PI_META_DIR=/data/gateway/meta \

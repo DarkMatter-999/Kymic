@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { useGatewayChat } from './chat/useGatewayChat';
 import { checkSession, logout } from './chat/auth';
 import { LoginScreen } from './components/LoginScreen';
@@ -28,17 +27,23 @@ import { SchedulesSidebar } from './components/SchedulesSidebar';
 
 const CONVERSATION_KEY = 'codemode.conversationId';
 
+// crypto.randomUUID needs a secure context; getRandomValues does not.
+function newConversationId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // One conversation per browser until a conversation list exists; persisting the ID
 // lets a reload reconnect to the same Pi session instead of starting over.
 function loadConversationId(): string {
   try {
     const existing = window.localStorage.getItem(CONVERSATION_KEY);
     if (existing) return existing;
-    const created = uuidv4();
+    const created = newConversationId();
     window.localStorage.setItem(CONVERSATION_KEY, created);
     return created;
   } catch {
-    return uuidv4();
+    return newConversationId();
   }
 }
 

@@ -31,7 +31,6 @@ async function boot(extraEnv = {}) {
       env: {
         PATH: process.env.PATH,
         PORT: String(port),
-        PI_GATEWAY: '1',
         GATEWAY_PASSWORD: PASSWORD,
         ALLOWED_ORIGINS: ORIGIN,
         PI_DATA_DIR: dataDir,

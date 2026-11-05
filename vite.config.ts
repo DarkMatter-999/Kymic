@@ -18,12 +18,12 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
-          target: env.VITE_PROXY_TARGET || 'http://localhost:3000',
+          target: env.VITE_PROXY_TARGET || 'http://127.0.0.1:3000',
           changeOrigin: true,
           secure: false,
         },
         '/gateway': {
-          target: env.VITE_PROXY_TARGET || 'http://localhost:3000',
+          target: env.VITE_PROXY_TARGET || 'http://127.0.0.1:3000',
           ws: true,
           // Keep the browser's Origin so the gateway's origin check still applies.
           changeOrigin: false,

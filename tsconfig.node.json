@@ -24,10 +24,6 @@
   },
   "include": [
     "vite.config.ts",
-    "server/**/*.ts",
-    "mcp-servers/cm-cli-server.ts",
-    "mcp-servers/canvas-server.ts",
-    "mcp-servers/subagent-server.ts",
-    "mcp-servers/skill-manager-server.ts"
+    "server/**/*.ts"
   ]
 }
