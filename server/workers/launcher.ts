@@ -45,6 +45,8 @@ const STDERR_LIMIT = 16 * 1024;
  */
 export class WorkerLauncher {
   private readonly workers = new Map<string, Promise<Worker>>();
+  /** Workers whose process is up, for callers that must not start one. */
+  private readonly live = new Map<string, Worker>();
 
   private readonly config: LauncherConfig;
 
@@ -71,6 +73,11 @@ export class WorkerLauncher {
       existing.catch(() => this.workers.delete(conversationId));
     }
     return existing;
+  }
+
+  /** The running worker, if any; never starts one. */
+  peek(conversationId: string): Worker | undefined {
+    return this.live.get(conversationId);
   }
 
   async stop(conversationId: string): Promise<void> {
@@ -152,6 +159,9 @@ export class WorkerLauncher {
           `Pi exited (${code ?? signal})${stderr ? `: ${stderr.slice(-500)}` : ''}`
         )
       );
+      if (this.live.get(conversationId)?.child === child) {
+        this.live.delete(conversationId);
+      }
       config.onExit?.(conversationId, { code, signal, stderr });
       this.workers.get(conversationId)?.then((w) => {
         if (w.child === child) this.workers.delete(conversationId);
@@ -161,6 +171,14 @@ export class WorkerLauncher {
       child.once('spawn', () => resolve());
       child.once('error', reject);
     });
-    return { conversationId, workspace, child, rpc, stderrTail: () => stderr };
+    const worker: Worker = {
+      conversationId,
+      workspace,
+      child,
+      rpc,
+      stderrTail: () => stderr,
+    };
+    this.live.set(conversationId, worker);
+    return worker;
   }
 }

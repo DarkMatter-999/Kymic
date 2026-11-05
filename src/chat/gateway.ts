@@ -69,6 +69,14 @@ export class GatewayClient {
     return this.send({ type: 'abort' });
   }
 
+  /** Answer an extension dialog; exactly one of value / confirmed / cancelled. */
+  respondDialog(
+    dialogId: string,
+    answer: { value: string } | { confirmed: boolean } | { cancelled: true }
+  ): boolean {
+    return this.send({ type: 'dialog_response', dialogId, ...answer });
+  }
+
   private send(command: Record<string, unknown>): boolean {
     if (!this.socket || this.socket.readyState !== OPEN) return false;
     this.socket.send(

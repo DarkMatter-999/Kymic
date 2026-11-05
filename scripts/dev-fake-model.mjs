@@ -13,9 +13,29 @@ const lastUser = (req) => {
     ? c
     : (c ?? []).map((b) => b.text ?? '').join('');
 };
+// Commands (need PI_EXTENSIONS=...,tests/fixtures/extensions/dialog-ext.mjs on the server):
+//   /ask select|confirm|input|editor   raises that extension dialog
+//   /noise                             fires notify/setStatus/setWidget
 const model = await startFakeModel([], {
   port,
-  fallback: (req) => ({ text: `You said: ${lastUser(req)}`, chunkDelayMs: 60 }),
+  fallback: (req) => {
+    const last = req.messages.at(-1);
+    if (last?.role === 'tool') {
+      return {
+        text: `Tool finished: ${String(last.content).slice(0, 300)}`,
+        chunkDelayMs: 30,
+      };
+    }
+    const text = lastUser(req).trim();
+    const ask = text.match(/^\/ask\s+(select|confirm|input|editor)\b/);
+    if (ask)
+      return {
+        toolCalls: [{ name: 'ask_user', arguments: { method: ask[1] } }],
+      };
+    if (text === '/noise')
+      return { toolCalls: [{ name: 'ui_noise', arguments: {} }] };
+    return { text: `You said: ${text}`, chunkDelayMs: 60 };
+  },
 });
 await mkdir(home, { recursive: true });
 await writeFile(resolve(home, 'models.json'), model.modelsJson());

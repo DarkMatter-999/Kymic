@@ -28,6 +28,21 @@ export function useGatewayChat(conversationId: string) {
     []
   );
   const stop = useCallback(() => void client.current?.abort(), []);
+  const respondDialog = useCallback(
+    (
+      dialogId: string,
+      answer: { value: string } | { confirmed: boolean } | { cancelled: true }
+    ) => client.current?.respondDialog(dialogId, answer) ?? false,
+    []
+  );
+  const dismissNotice = useCallback(
+    () => dispatch({ type: 'dismiss_notice' }),
+    []
+  );
+  const dismissUnsupported = useCallback(
+    () => dispatch({ type: 'dismiss_unsupported' }),
+    []
+  );
 
   return {
     messages: state.messages,
@@ -36,5 +51,11 @@ export function useGatewayChat(conversationId: string) {
     connected,
     sendMessage,
     stop,
+    dialogs: state.dialogs,
+    notice: state.notice,
+    unsupported: state.unsupported,
+    respondDialog,
+    dismissNotice,
+    dismissUnsupported,
   };
 }

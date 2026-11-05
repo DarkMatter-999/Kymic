@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useGatewayChat } from './chat/useGatewayChat';
+import { checkSession, logout } from './chat/auth';
+import { LoginScreen } from './components/LoginScreen';
+import { ExtensionDialog } from './components/ExtensionDialog';
 import {
   Send,
   Bot,
@@ -11,6 +14,7 @@ import {
   Zap,
   Layout,
   CalendarClock,
+  LogOut,
 } from 'lucide-react';
 
 import './App.css';
@@ -37,7 +41,7 @@ function loadConversationId(): string {
   }
 }
 
-function App() {
+function ChatApp({ onSignOut }: { onSignOut: () => void }) {
   const [conversationId] = useState(loadConversationId);
 
   const {
@@ -47,6 +51,12 @@ function App() {
     error,
     connected,
     stop,
+    dialogs,
+    notice,
+    unsupported,
+    respondDialog,
+    dismissNotice,
+    dismissUnsupported,
   } = useGatewayChat(conversationId);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -253,6 +263,14 @@ function App() {
             </button>
             <button
               type="button"
+              onClick={onSignOut}
+              title="Sign out"
+              className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
+            >
+              <LogOut size={18} className="text-zinc-400" />
+            </button>
+            <button
+              type="button"
               onClick={() => setShowSettings(true)}
               className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
             >
@@ -333,6 +351,45 @@ function App() {
             </div>
           )}
 
+          {/* Extension notices */}
+          {notice && (
+            <div
+              className={`max-w-3xl mx-auto px-4 py-3 rounded-xl text-sm flex items-start justify-between gap-3 border ${
+                notice.level === 'error'
+                  ? 'border-red-800/50 text-red-400'
+                  : notice.level === 'warning'
+                    ? 'border-yellow-800/50 text-yellow-500'
+                    : 'border-zinc-800 text-zinc-300'
+              }`}
+            >
+              <span className="whitespace-pre-wrap wrap-break-words">
+                {notice.message}
+              </span>
+              <button
+                type="button"
+                onClick={dismissNotice}
+                className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+          {unsupported.length > 0 && (
+            <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl text-xs flex items-start justify-between gap-3 border border-zinc-800 text-zinc-500">
+              <span>
+                An extension used UI this app does not support:{' '}
+                {unsupported.join(', ')}.
+              </span>
+              <button
+                type="button"
+                onClick={dismissUnsupported}
+                className="text-zinc-500 hover:text-zinc-300 shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl error-message text-red-400 text-sm">
@@ -402,12 +459,59 @@ function App() {
         />
       )}
 
+      {dialogs[0] && (
+        <ExtensionDialog
+          key={dialogs[0].dialogId}
+          dialog={dialogs[0]}
+          queued={dialogs.length - 1}
+          onRespond={(answer) => respondDialog(dialogs[0].dialogId, answer)}
+        />
+      )}
+
       {/* Settings Modal */}
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
       />
     </div>
+  );
+}
+
+const SESSION_POLL_MS = 60_000;
+
+// Shows the login form until the server confirms a live session, and returns to it
+// when the session expires. An unknown result (server unreachable) keeps the
+// current state so a brief outage doesn't discard the chat.
+function App() {
+  const [session, setSession] = useState<'checking' | 'in' | 'out'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const result = await checkSession();
+      if (!cancelled && result !== 'unknown') setSession(result);
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), SESSION_POLL_MS);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
+
+  if (session === 'checking') return <div className="h-screen bg-black" />;
+  if (session === 'out')
+    return <LoginScreen onLoggedIn={() => setSession('in')} />;
+  return (
+    <ChatApp
+      onSignOut={() => {
+        void logout()
+          .then(checkSession)
+          .then((result) => setSession(result === 'in' ? 'in' : 'out'));
+      }}
+    />
   );
 }
 

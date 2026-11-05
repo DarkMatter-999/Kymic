@@ -1,4 +1,14 @@
-import type { ServerEvent } from '../../server/gateway/protocol';
+import type { DialogRequest, ServerEvent } from '../../server/gateway/protocol';
+
+/** Actions that originate in the browser, never on the wire. */
+export type LocalAction =
+  | { type: 'dismiss_notice' }
+  | { type: 'dismiss_unsupported' };
+
+export interface Notice {
+  level: 'info' | 'warning' | 'error';
+  message: string;
+}
 
 /** Presentation parts understood by AgentMessage / UserMessage / ToolCallBlock. */
 export interface ChatPart {
@@ -22,6 +32,11 @@ export interface ChatState {
   messages: ChatMessage[];
   running: boolean;
   error: string | null;
+  /** Extension questions waiting for the user, oldest first. */
+  dialogs: DialogRequest[];
+  notice: Notice | null;
+  /** Extension UI methods this app cannot render, each listed once. */
+  unsupported: string[];
   seq: number;
 }
 
@@ -29,6 +44,9 @@ export const initialState: ChatState = {
   messages: [],
   running: false,
   error: null,
+  dialogs: [],
+  notice: null,
+  unsupported: [],
   seq: 0,
 };
 
@@ -168,7 +186,10 @@ function clone(messages: ChatMessage[]): ChatMessage[] {
   }));
 }
 
-export function reduce(state: ChatState, event: ServerEvent): ChatState {
+export function reduce(
+  state: ChatState,
+  event: ServerEvent | LocalAction
+): ChatState {
   const messages = clone(state.messages);
   const next: ChatState = { ...state, messages, seq: state.seq + 1 };
 
@@ -189,7 +210,35 @@ export function reduce(state: ChatState, event: ServerEvent): ChatState {
         messages: messagesFromPi(event.messages),
         running: event.running,
         error: null,
+        dialogs: event.dialogs ?? [],
       };
+    case 'dialog_request': {
+      const { v: _v, conversationId: _c, type: _t, ...dialog } = event;
+      void _v;
+      void _c;
+      void _t;
+      if (state.dialogs.some((d) => d.dialogId === dialog.dialogId))
+        return state;
+      return { ...next, dialogs: [...state.dialogs, dialog] };
+    }
+    case 'dialog_closed':
+      return {
+        ...next,
+        dialogs: state.dialogs.filter((d) => d.dialogId !== event.dialogId),
+      };
+    case 'notice':
+      return {
+        ...next,
+        notice: { level: event.level, message: event.message },
+      };
+    case 'ui_unsupported':
+      return state.unsupported.includes(event.method)
+        ? state
+        : { ...next, unsupported: [...state.unsupported, event.method] };
+    case 'dismiss_notice':
+      return { ...next, notice: null };
+    case 'dismiss_unsupported':
+      return { ...next, unsupported: [] };
     case 'text_delta':
     case 'thinking_delta': {
       const type = event.type === 'text_delta' ? 'text' : 'reasoning';

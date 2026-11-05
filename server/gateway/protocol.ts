@@ -3,8 +3,43 @@ export const PROTOCOL_VERSION = 1 as const;
 export const MAX_PROMPT_LENGTH = 100_000;
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 
+export type DialogMethod = 'select' | 'confirm' | 'input' | 'editor';
+export type DialogCloseReason =
+  | 'answered'
+  | 'cancelled'
+  | 'timeout'
+  | 'disconnected'
+  | 'worker_exited';
+
+/** A pending extension question, as shown to the browser. */
+export interface DialogRequest {
+  dialogId: string;
+  method: DialogMethod;
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  /** Epoch ms after which the gateway (or Pi) gives up waiting. */
+  expiresAt?: number;
+}
+
+/** Exactly one of value / confirmed / cancelled. */
+export type DialogAnswer =
+  | { value: string }
+  | { confirmed: boolean }
+  | { cancelled: true };
+
+export const MAX_DIALOG_VALUE_LENGTH = 100_000;
+
 export type ClientCommand =
   | { v: 1; type: 'prompt'; conversationId: string; text: string }
+  | ({
+      v: 1;
+      type: 'dialog_response';
+      conversationId: string;
+      dialogId: string;
+    } & DialogAnswer)
   | { v: 1; type: 'abort'; conversationId: string }
   | { v: 1; type: 'subscribe'; conversationId: string };
 
@@ -28,7 +63,16 @@ export type ServerEvent = { v: 1; conversationId: string } & (
       isError: boolean;
     }
   | { type: 'settled'; aborted: boolean }
-  | { type: 'snapshot'; running: boolean; messages: unknown[] }
+  | {
+      type: 'snapshot';
+      running: boolean;
+      messages: unknown[];
+      dialogs: DialogRequest[];
+    }
+  | ({ type: 'dialog_request' } & DialogRequest)
+  | { type: 'dialog_closed'; dialogId: string; reason: DialogCloseReason }
+  | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string }
+  | { type: 'ui_unsupported'; method: string }
   | { type: 'error'; message: string }
 );
 
@@ -55,6 +99,39 @@ export function parseClientCommand(raw: unknown): ClientCommand {
       )
         invalid('text');
       return { v: 1, type: 'prompt', conversationId, text: r.text };
+    case 'dialog_response': {
+      if (
+        typeof r.dialogId !== 'string' ||
+        r.dialogId.length === 0 ||
+        r.dialogId.length > 200
+      )
+        invalid('dialogId');
+      const base = {
+        v: 1 as const,
+        type: 'dialog_response' as const,
+        conversationId,
+        dialogId: r.dialogId,
+      };
+      const given = ['value', 'confirmed', 'cancelled'].filter(
+        (key) => key in r
+      );
+      if (given.length !== 1)
+        invalid('exactly one of value/confirmed/cancelled');
+      if (given[0] === 'value') {
+        if (
+          typeof r.value !== 'string' ||
+          r.value.length > MAX_DIALOG_VALUE_LENGTH
+        )
+          invalid('value');
+        return { ...base, value: r.value };
+      }
+      if (given[0] === 'confirmed') {
+        if (typeof r.confirmed !== 'boolean') invalid('confirmed');
+        return { ...base, confirmed: r.confirmed };
+      }
+      if (r.cancelled !== true) invalid('cancelled');
+      return { ...base, cancelled: true };
+    }
     case 'abort':
       return { v: 1, type: 'abort', conversationId };
     case 'subscribe':

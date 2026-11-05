@@ -14,6 +14,7 @@ import { getModel } from './provider';
 import { getMcpServersConfig } from './mcp-servers-config';
 import { ConversationManager } from './gateway/conversations';
 import { attachGateway } from './gateway/ws';
+import { Auth } from './gateway/auth';
 import { Scheduler } from './scheduler/scheduler';
 import { createScheduleRouter } from './scheduler/http';
 import { mkdirSync } from 'node:fs';
@@ -24,59 +25,124 @@ const app = express();
 const server = http.createServer(app);
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
-app.use(cors());
+const gatewayEnabled = process.env.PI_GATEWAY === '1';
+// The old AI-SDK agent path. Off by default; when on it still requires login.
+const legacyEnabled = process.env.LEGACY_AGENT === '1';
+const dataRoot = process.env.PI_DATA_DIR ?? './.pi-data';
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
+).split(',');
+
+// --- Authentication -------------------------------------------------------
+// GATEWAY_PASSWORD enables login. PI_GATEWAY_INSECURE_DEV=1 disables auth for
+// local development only. With neither, every protected route denies access.
+const insecureDev = process.env.PI_GATEWAY_INSECURE_DEV === '1';
+let auth: Auth | undefined;
+if (gatewayEnabled || legacyEnabled) {
+  mkdirSync(dataRoot, { recursive: true });
+  if (process.env.GATEWAY_PASSWORD) {
+    auth = new Auth({
+      dbPath: `${dataRoot}/auth.db`,
+      password: process.env.GATEWAY_PASSWORD,
+      allowedOrigins,
+      secureCookies: process.env.COOKIE_SECURE === '1',
+      sessionTtlMs: process.env.SESSION_TTL_HOURS
+        ? Number(process.env.SESSION_TTL_HOURS) * 3_600_000
+        : undefined,
+    });
+  } else if (insecureDev) {
+    console.warn(
+      'PI_GATEWAY_INSECURE_DEV=1: authentication is DISABLED. Local development only.'
+    );
+  } else {
+    console.warn(
+      'No GATEWAY_PASSWORD set: all protected routes will deny access.'
+    );
+  }
+}
+const authenticate = (req: { headers: { cookie?: string } }): boolean =>
+  auth ? auth.authenticate(req) : insecureDev;
+
+// Explicit allowlist: no permissive CORS default.
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: '16mb' }));
 
-const mcpManager = new McpManager();
+if (auth) {
+  app.use('/api/auth', auth.router);
+} else if (gatewayEnabled || legacyEnabled) {
+  const unconfigured = express.Router();
+  unconfigured.get('/session', (_req, res) => {
+    if (insecureDev) res.json({ authenticated: true, insecure: true });
+    else res.status(401).json({ authenticated: false });
+  });
+  unconfigured.post('/login', (_req, res) => {
+    res.status(503).json({ error: 'Authentication is not configured' });
+  });
+  unconfigured.post('/logout', (_req, res) => res.status(204).end());
+  app.use('/api/auth', unconfigured);
+}
 
-const setupMcp = async () => {
-  console.log('Initializing MCP Servers...');
-  const servers = getMcpServersConfig();
-  await Promise.all(servers.map((s) => mcpManager.registerServer(s)));
-  console.log('MCP Servers Ready.');
-};
+if (legacyEnabled) {
+  const mcpManager = new McpManager();
 
-setupMcp().catch(console.error);
-
-app.post('/api/chat', async (req, res) => {
-  const { messages, conversationId } = req.body as {
-    messages: UIMessage[];
-    conversationId?: string;
+  const setupMcp = async () => {
+    console.log('Initializing MCP Servers...');
+    const servers = getMcpServersConfig();
+    await Promise.all(servers.map((s) => mcpManager.registerServer(s)));
+    console.log('MCP Servers Ready.');
   };
 
-  if (!messages || !Array.isArray(messages)) {
-    res.status(400).json({ error: 'messages array is required' });
-    return;
-  }
+  setupMcp().catch(console.error);
 
-  try {
-    const modelMessages = await convertToModelMessages(messages);
+  app.post(
+    '/api/chat',
+    (req, res, next) => {
+      if (authenticate(req)) next();
+      else res.status(401).json({ error: 'Unauthorized' });
+    },
+    async (req, res) => {
+      const { messages, conversationId } = req.body as {
+        messages: UIMessage[];
+        conversationId?: string;
+      };
 
-    const mappedTools = await mcpManager.getAllMappedTools({ conversationId });
+      if (!messages || !Array.isArray(messages)) {
+        res.status(400).json({ error: 'messages array is required' });
+        return;
+      }
 
-    const codemodeTool = createCodeTool({
-      tools: mappedTools,
-      executor: localNodeExecutor,
-    });
+      try {
+        const modelMessages = await convertToModelMessages(messages);
 
-    const tools: ToolSet = {
-      codemode: codemodeTool,
-    };
+        const mappedTools = await mcpManager.getAllMappedTools({
+          conversationId,
+        });
 
-    const result = streamText({
-      model: getModel(),
-      system: systemPrompt,
-      messages: modelMessages,
-      tools,
-      maxRetries: 3,
-    });
+        const codemodeTool = createCodeTool({
+          tools: mappedTools,
+          executor: localNodeExecutor,
+        });
 
-    result.pipeUIMessageStreamToResponse(res);
-  } catch (err) {
-    console.error('Chat error:', err);
-    res.status(500).json({ error: 'Failed to stream response' });
-  }
-});
+        const tools: ToolSet = {
+          codemode: codemodeTool,
+        };
+
+        const result = streamText({
+          model: getModel(),
+          system: systemPrompt,
+          messages: modelMessages,
+          tools,
+          maxRetries: 3,
+        });
+
+        result.pipeUIMessageStreamToResponse(res);
+      } catch (err) {
+        console.error('Chat error:', err);
+        res.status(500).json({ error: 'Failed to stream response' });
+      }
+    }
+  );
+}
 
 // WebSocket Setup
 // Legacy canvas/subagent socket stays on '/'; the Pi gateway owns '/gateway'.
@@ -85,6 +151,16 @@ const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url ?? '', 'http://localhost').pathname;
   if (pathname === '/') {
+    const origin = req.headers.origin;
+    if (
+      !legacyEnabled ||
+      !origin ||
+      !allowedOrigins.includes(origin) ||
+      !authenticate(req)
+    ) {
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) =>
       wss.emit('connection', ws, req)
     );
@@ -117,40 +193,40 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Redis Subscriber Setup
-const redisSubscriber = new Redis(
-  process.env.REDIS_URL ?? 'redis://redis:6379'
-);
+if (legacyEnabled) {
+  // Redis Subscriber Setup
+  const redisSubscriber = new Redis(
+    process.env.REDIS_URL ?? 'redis://redis:6379'
+  );
 
-redisSubscriber.psubscribe('conversation:*', (err, count) => {
-  if (err) {
-    console.error('Redis Subscribe Error:', err);
-  } else {
-    console.log(
-      `Redis Subscribed to ${count} patterns (conversation channels)`
-    );
-  }
-});
+  redisSubscriber.psubscribe('conversation:*', (err, count) => {
+    if (err) {
+      console.error('Redis Subscribe Error:', err);
+    } else {
+      console.log(
+        `Redis Subscribed to ${count} patterns (conversation channels)`
+      );
+    }
+  });
 
-redisSubscriber.on('pmessage', (_pattern, channel, message) => {
-  const match = channel.match(/^conversation:(.+)$/);
-  if (match) {
-    const conversationId = match[1];
-    const clientSet = wsClients.get(conversationId);
-    if (clientSet) {
-      for (const ws of clientSet) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(message);
+  redisSubscriber.on('pmessage', (_pattern, channel, message) => {
+    const match = channel.match(/^conversation:(.+)$/);
+    if (match) {
+      const conversationId = match[1];
+      const clientSet = wsClients.get(conversationId);
+      if (clientSet) {
+        for (const ws of clientSet) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+          }
         }
       }
     }
-  }
-});
+  });
+}
 
-// Pi gateway (spike). Disabled unless PI_GATEWAY=1. There is no real authentication
-// until the auth milestone, so connections are denied unless PI_GATEWAY_INSECURE_DEV=1.
-if (process.env.PI_GATEWAY === '1') {
-  const dataRoot = process.env.PI_DATA_DIR ?? './.pi-data';
+// Pi gateway. Disabled unless PI_GATEWAY=1.
+if (gatewayEnabled) {
   const gatewayManager = new ConversationManager({
     piCli:
       process.env.PI_CLI ??
@@ -161,6 +237,11 @@ if (process.env.PI_GATEWAY === '1') {
     skills: (process.env.PI_SKILLS ?? './skills/spike/SKILL.md')
       .split(',')
       .filter(Boolean),
+    // Operator allowlist only; never taken from a request. Unset keeps Pi's built-in
+    // MCP and codemode extensions.
+    extensions: process.env.PI_EXTENSIONS
+      ? process.env.PI_EXTENSIONS.split(',').filter(Boolean)
+      : undefined,
     uid: process.env.PI_AGENT_UID
       ? Number(process.env.PI_AGENT_UID)
       : undefined,
@@ -168,25 +249,15 @@ if (process.env.PI_GATEWAY === '1') {
       ? Number(process.env.PI_AGENT_GID)
       : undefined,
   });
-  const insecureDev = process.env.PI_GATEWAY_INSECURE_DEV === '1';
-  if (!insecureDev) {
-    console.warn(
-      'Pi gateway enabled but no authentication exists yet: all connections will be denied. Set PI_GATEWAY_INSECURE_DEV=1 for local development only.'
-    );
-  }
-  const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
-  ).split(',');
   attachGateway(server, {
     manager: gatewayManager,
     allowedOrigins,
-    authenticate: () => insecureDev,
+    authenticate,
     passthrough: true,
   });
 
   // Scheduled runs live in the gateway, not the browser. Runs left in flight by
   // a previous process are marked interrupted on startup and never re-run.
-  mkdirSync(dataRoot, { recursive: true });
   const scheduler = new Scheduler({
     dbPath: `${dataRoot}/scheduler.db`,
     executor: gatewayManager,
@@ -197,11 +268,12 @@ if (process.env.PI_GATEWAY === '1') {
     createScheduleRouter({
       scheduler,
       allowedOrigins,
-      authenticate: () => insecureDev,
+      authenticate,
     })
   );
   const shutdown = () => {
     scheduler.close();
+    auth?.close();
     void gatewayManager.stopAll().finally(() => process.exit(0));
   };
   process.once('SIGTERM', shutdown);

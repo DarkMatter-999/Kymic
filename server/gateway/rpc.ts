@@ -32,6 +32,14 @@ export class RpcClient {
     input.on('error', (error) => this.close(error));
   }
 
+  /** Write a record that expects no correlated response (e.g. extension_ui_response). */
+  send(record: Record<string, unknown>): void {
+    if (this.closed) throw new Error('RPC transport closed');
+    this.input.write(JSON.stringify(record) + '\n', (error) => {
+      if (error) this.close(error);
+    });
+  }
+
   command(
     type: string,
     params: Record<string, unknown> = {}

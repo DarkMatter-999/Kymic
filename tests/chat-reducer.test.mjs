@@ -232,3 +232,33 @@ test('user content given as text blocks renders as plain text', () => {
   ]);
   assert.equal(s.messages[0].parts[0].text, 'ab');
 });
+
+const dlg = (id, extra = {}) => ev('dialog_request', { dialogId: id, method: 'confirm', title: 'Proceed?', ...extra });
+
+test('dialogs are queued in arrival order and removed when the server closes them', () => {
+  let s = run([dlg('a'), dlg('b', { method: 'input' })]);
+  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['a', 'b']);
+  s = reduce(s, ev('dialog_closed', { dialogId: 'a', reason: 'answered' }));
+  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['b']);
+  s = reduce(s, ev('dialog_closed', { dialogId: 'ghost', reason: 'timeout' }));
+  assert.equal(s.dialogs.length, 1);
+});
+
+test('a repeated dialog_request does not duplicate; snapshot replaces the dialog list', () => {
+  let s = run([dlg('a'), dlg('a')]);
+  assert.equal(s.dialogs.length, 1);
+  s = reduce(s, ev('snapshot', { running: true, messages: [], dialogs: [dlg('z')] .map(({ dialogId, method, title }) => ({ dialogId, method, title })) }));
+  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['z']);
+  s = reduce(s, ev('snapshot', { running: false, messages: [], dialogs: [] }));
+  assert.deepEqual(s.dialogs, []);
+});
+
+test('notices and unsupported UI methods are surfaced and dismissible', () => {
+  let s = run([ev('notice', { level: 'warning', message: 'careful' }), ev('ui_unsupported', { method: 'setStatus' }), ev('ui_unsupported', { method: 'setStatus' }), ev('ui_unsupported', { method: 'setWidget' })]);
+  assert.deepEqual({ level: s.notice.level, message: s.notice.message }, { level: 'warning', message: 'careful' });
+  assert.deepEqual(s.unsupported, ['setStatus', 'setWidget']);
+  s = reduce(s, { type: 'dismiss_notice' });
+  assert.equal(s.notice, null);
+  s = reduce(s, { type: 'dismiss_unsupported' });
+  assert.deepEqual(s.unsupported, []);
+});

@@ -5,6 +5,7 @@ import type { ConversationManager } from './conversations.js';
 import {
   PROTOCOL_VERSION,
   parseClientCommand,
+  type DialogAnswer,
   type ServerEvent,
 } from './protocol.js';
 
@@ -102,6 +103,14 @@ function handleConnection(ws: WebSocket, { manager }: GatewayOptions): void {
           type: 'snapshot',
           ...snapshot,
         });
+      } else if (command.type === 'dialog_response') {
+        const answer: DialogAnswer =
+          'value' in command
+            ? { value: command.value }
+            : 'confirmed' in command
+              ? { confirmed: command.confirmed }
+              : { cancelled: true };
+        manager.respondDialog(command.conversationId, command.dialogId, answer);
       } else if (command.type === 'prompt') {
         await manager.prompt(command.conversationId, command.text);
       } else {

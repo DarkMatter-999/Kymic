@@ -1,8 +1,11 @@
 import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
+import { DialogBroker } from './dialogs.js';
 import {
   PROTOCOL_VERSION,
   projectPiEvent,
   visibleMessages,
+  type DialogAnswer,
+  type DialogRequest,
   type ServerEvent,
 } from './protocol.js';
 
@@ -17,10 +20,23 @@ export class ConversationManager {
   readonly launcher: WorkerLauncher;
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly running = new Set<string>();
+  private readonly brokers = new Map<string, DialogBroker>();
+  private readonly dialogTimeoutMs: number;
+  private readonly disconnectGraceMs: number;
 
-  constructor(config: Omit<LauncherConfig, 'onEvent' | 'onExit'>) {
+  constructor(
+    config: Omit<LauncherConfig, 'onEvent' | 'onExit'> & {
+      /** Deadline for dialogs without a Pi-side timeout; expiry cancels (denies). */
+      dialogTimeoutMs?: number;
+      /** Cancel pending dialogs after this long with no client connected. */
+      disconnectGraceMs?: number;
+    }
+  ) {
+    const { dialogTimeoutMs, disconnectGraceMs, ...launcherConfig } = config;
+    this.dialogTimeoutMs = dialogTimeoutMs ?? 5 * 60_000;
+    this.disconnectGraceMs = disconnectGraceMs ?? 30_000;
     this.launcher = new WorkerLauncher({
-      ...config,
+      ...launcherConfig,
       onEvent: (id, event) => this.handlePiEvent(id, event),
       onExit: (id, info) => this.handleExit(id, info),
     });
@@ -30,9 +46,11 @@ export class ConversationManager {
     let set = this.listeners.get(conversationId);
     if (!set) this.listeners.set(conversationId, (set = new Set()));
     set.add(listener);
+    this.brokers.get(conversationId)?.listenersChanged();
     return () => {
       set.delete(listener);
       if (set.size === 0) this.listeners.delete(conversationId);
+      this.brokers.get(conversationId)?.listenersChanged();
     };
   }
 
@@ -70,6 +88,17 @@ export class ConversationManager {
     }
   }
 
+  /** Answer a pending extension dialog. Throws if it is unknown, stale or invalid. */
+  respondDialog(
+    conversationId: string,
+    dialogId: string,
+    answer: DialogAnswer
+  ): void {
+    const broker = this.brokers.get(conversationId);
+    if (!broker) throw new Error('Unknown or already answered dialog');
+    broker.respond(dialogId, answer);
+  }
+
   async abort(conversationId: string): Promise<void> {
     if (!this.running.has(conversationId)) return;
     const worker = await this.launcher.start(conversationId);
@@ -77,9 +106,11 @@ export class ConversationManager {
   }
 
   /** Authoritative state from Pi itself; starts an idle worker if none is running. */
-  async snapshot(
-    conversationId: string
-  ): Promise<{ running: boolean; messages: unknown[] }> {
+  async snapshot(conversationId: string): Promise<{
+    running: boolean;
+    messages: unknown[];
+    dialogs: DialogRequest[];
+  }> {
     const worker = await this.launcher.start(conversationId);
     const data = (await worker.rpc.command('get_messages')) as {
       messages: unknown[];
@@ -87,6 +118,7 @@ export class ConversationManager {
     return {
       running: this.running.has(conversationId),
       messages: visibleMessages(data.messages),
+      dialogs: this.brokers.get(conversationId)?.list() ?? [],
     };
   }
 
@@ -94,8 +126,30 @@ export class ConversationManager {
     return this.launcher.stop(conversationId);
   }
 
-  stopAll(): Promise<void> {
-    return this.launcher.stopAll();
+  async stopAll(): Promise<void> {
+    await this.launcher.stopAll();
+    for (const broker of this.brokers.values()) broker.dispose();
+    this.brokers.clear();
+  }
+
+  private broker(conversationId: string): DialogBroker {
+    let broker = this.brokers.get(conversationId);
+    if (!broker) {
+      broker = new DialogBroker({
+        conversationId,
+        emit: (event) => this.emit(conversationId, event),
+        sendToWorker: (record) => {
+          const worker = this.launcher.peek(conversationId);
+          if (!worker) throw new Error('Agent process is not running');
+          worker.rpc.send(record);
+        },
+        hasListeners: () => this.listenerCount(conversationId) > 0,
+        timeoutMs: this.dialogTimeoutMs,
+        graceMs: this.disconnectGraceMs,
+      });
+      this.brokers.set(conversationId, broker);
+    }
+    return broker;
   }
 
   private emit(conversationId: string, event: ServerEvent): void {
@@ -121,6 +175,15 @@ export class ConversationManager {
   }
 
   private handlePiEvent(conversationId: string, event: unknown): void {
+    if (
+      event &&
+      typeof event === 'object' &&
+      this.broker(conversationId).handleRequest(
+        event as Record<string, unknown>
+      )
+    ) {
+      return;
+    }
     for (const projected of projectPiEvent(conversationId, event)) {
       this.emit(conversationId, projected);
       if (projected.type === 'settled') this.setRunning(conversationId, false);
@@ -131,6 +194,8 @@ export class ConversationManager {
     conversationId: string,
     info: { code: number | null; signal: string | null }
   ): void {
+    // Questions asked by a dead process can never be answered.
+    this.brokers.get(conversationId)?.workerExited();
     if (!this.running.has(conversationId)) return;
     this.emit(conversationId, {
       v: PROTOCOL_VERSION,
