@@ -18,7 +18,8 @@ import { Auth } from './gateway/auth';
 import { LoginManager, createLoginRouter } from './gateway/login';
 import { Scheduler } from './scheduler/scheduler';
 import { createScheduleRouter } from './scheduler/http';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { readinessFailures } from './health';
 import { DEFAULT_PROFILES } from './workers/profiles';
 import { resolve } from 'node:path';
 
@@ -68,7 +69,40 @@ const authenticate = (req: { headers: { cookie?: string } }): boolean =>
 
 // Explicit allowlist: no permissive CORS default.
 app.use(cors({ origin: allowedOrigins, credentials: true }));
-app.use(express.json({ limit: '16mb' }));
+// Only the legacy chat route takes large bodies; everything else is small JSON.
+app.use(express.json({ limit: legacyEnabled ? '16mb' : '256kb' }));
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// Liveness: the process is up. Readiness: it could actually start a worker.
+// Unauthenticated, so neither says why; failures go to the log.
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+app.get('/health/ready', async (_req, res) => {
+  const failures = gatewayEnabled
+    ? await readinessFailures({
+        piCli:
+          process.env.PI_CLI ??
+          './node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+        dataRoot,
+        files: (process.env.PI_SKILLS ?? './skills/spike/SKILL.md')
+          .split(',')
+          .filter(Boolean),
+      })
+    : [];
+  if (failures.length > 0) {
+    console.error('Not ready:', failures.join('; '));
+    res.status(503).json({ status: 'unavailable' });
+    return;
+  }
+  res.json({ status: 'ready' });
+});
 
 if (auth) {
   app.use('/api/auth', auth.router);
@@ -234,8 +268,19 @@ if (gatewayEnabled) {
     piCli:
       process.env.PI_CLI ??
       './node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
-    workspaceRoot: `${dataRoot}/workspaces`,
-    sessionRoot: `${dataRoot}/sessions`,
+    workspaceRoot: process.env.PI_WORKSPACE_DIR ?? `${dataRoot}/workspaces`,
+    sessionRoot: process.env.PI_SESSION_DIR ?? `${dataRoot}/sessions`,
+    metaRoot: process.env.PI_META_DIR,
+    // Workers reach the internet only through this proxy (see server/egress-proxy.ts).
+    env: process.env.PI_WORKER_PROXY
+      ? {
+          HTTP_PROXY: process.env.PI_WORKER_PROXY,
+          HTTPS_PROXY: process.env.PI_WORKER_PROXY,
+          http_proxy: process.env.PI_WORKER_PROXY,
+          https_proxy: process.env.PI_WORKER_PROXY,
+          NODE_USE_ENV_PROXY: '1',
+        }
+      : undefined,
     agentHome: process.env.PI_AGENT_HOME ?? `${dataRoot}/agent-home`,
     skills: (process.env.PI_SKILLS ?? './skills/spike/SKILL.md')
       .split(',')
@@ -307,6 +352,19 @@ if (gatewayEnabled) {
   process.once('SIGINT', shutdown);
 }
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Static frontend for the single-container deployment. The SPA fallback never
+// answers API or socket paths. No app-wide CSP: the canvas iframe is a srcdoc
+// document, which inherits its parent's policy, and sets its own strict one.
+const staticDir = process.env.STATIC_DIR;
+if (staticDir && existsSync(staticDir)) {
+  app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
+  app.get(/^\/(?!api\/|gateway|health).*/, (_req, res) => {
+    res.sendFile('index.html', { root: staticDir, maxAge: 0 });
+  });
+}
+
+// Loopback by default; the container sets HOST=0.0.0.0 behind its proxy.
+const HOST = process.env.HOST ?? '127.0.0.1';
+server.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
 });

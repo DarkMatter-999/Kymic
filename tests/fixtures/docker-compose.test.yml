@@ -1,0 +1,5 @@
+# Test-only override: lets the egress proxy reach a fake model on the host.
+services:
+  egress:
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'

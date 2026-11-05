@@ -1,5 +1,7 @@
-version: '3.8'
-
+# Development only. Both services publish to loopback. Authentication is off
+# (PI_GATEWAY_INSECURE_DEV) because nothing but this machine can reach it; set
+# GATEWAY_PASSWORD instead to test the login flow. Worker data lives in a named
+# volume, never in the bind-mounted source tree.
 services:
   frontend:
     build:
@@ -7,18 +9,15 @@ services:
       dockerfile: Dockerfile.dev
       target: dev
     ports:
-      - '5173:5173'
+      - '127.0.0.1:5173:5173'
     volumes:
       - .:/app
       - /app/node_modules
     environment:
       - VITE_PROXY_TARGET=http://backend:3000
-      - VITE_API_URL=http://localhost:5173/api
     command: npm run dev -- --host 0.0.0.0
     depends_on:
       - backend
-    networks:
-      - dev-network
 
   backend:
     build:
@@ -28,43 +27,23 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     volumes:
       - .:/app
       - /app/node_modules
+      - dev-data:/data
     environment:
       - NODE_ENV=development
+      - HOST=0.0.0.0
       - PORT=3000
-      - REDIS_URL=redis://redis:6379
-      - API_KEY=${API_KEY:-}
-      - API_URL=${API_URL:-}
-      - MODEL_NAME=${MODEL_NAME:-}
+      - PI_GATEWAY=1
+      - PI_GATEWAY_INSECURE_DEV=${PI_GATEWAY_INSECURE_DEV:-1}
+      - GATEWAY_PASSWORD=${GATEWAY_PASSWORD:-}
+      - PI_DATA_DIR=/data/gateway
+      - PI_WORKSPACE_DIR=/data/agent/workspaces
+      - PI_SESSION_DIR=/data/agent/sessions
+      - PI_AGENT_HOME=/data/agent/home
     command: npm run dev:server
-    depends_on:
-      - redis
-    networks:
-      - dev-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: code-mode-agents-redis-dev
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis-data-dev:/data
-    networks:
-      - dev-network
-    restart: unless-stopped
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 volumes:
-  redis-data-dev:
-    driver: local
-
-networks:
-  dev-network:
-    driver: bridge
+  dev-data:

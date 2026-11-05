@@ -138,7 +138,7 @@ test(
   'drops to the configured agent uid/gid (root only)',
   { skip: process.getuid() !== 0 },
   async () => {
-    make({ uid: 12345, gid: 12345 });
+    make({ uid: 12345, gid: 12345, metaRoot: join(root, 'meta') });
     const w = await launcher.start('conv-a');
     const p = await w.rpc.command('probe');
     assert.equal(p.uid, 12345);
@@ -160,4 +160,47 @@ test('relative configuration paths are resolved against the gateway cwd, not the
   const skillArg = probe.argv[probe.argv.indexOf('--skill') + 1];
   assert.equal(skillArg, resolve('skills/spike/SKILL.md'));
   assert.equal(probe.env.HOME, join(root, 'home2'));
+});
+
+test('dropping privileges requires a uid, a gid and a gateway-private metaRoot', () => {
+  for (const bad of [
+    { uid: 1000 },
+    { uid: 1000, gid: 1000 },
+    { uid: 1000, metaRoot: '/m' },
+    { gid: 1000, metaRoot: '/m' },
+  ])
+    assert.throws(() => make(bad), /uid, gid and a gateway-private metaRoot/);
+  make({ uid: 1000, gid: 1000, metaRoot: join(root, 'meta') });
+});
+
+test('operator env reaches the worker but cannot override the fixed variables', async () => {
+  make({
+    env: {
+      HTTPS_PROXY: 'http://egress:3128',
+      PATH: '/tmp/evil',
+      HOME: '/tmp/evil',
+      PI_CODING_AGENT_DIR: '/tmp/evil',
+    },
+  });
+  const w = await launcher.start('conv-env');
+  const p = await w.rpc.command('probe');
+  assert.equal(p.env.HTTPS_PROXY, 'http://egress:3128');
+  assert.equal(p.env.PATH, '/usr/local/bin:/usr/bin:/bin');
+  assert.equal(p.env.HOME, resolve(join(root, 'home')));
+  assert.equal(p.env.PI_CODING_AGENT_DIR, resolve(join(root, 'home')));
+});
+
+test('gateway-private records live in metaRoot, not in the worker-writable session directory', async () => {
+  make({ metaRoot: join(root, 'meta') });
+  await launcher.start('conv-meta');
+  await launcher.commitProfile('conv-meta');
+  const { readdir } = await import('node:fs/promises');
+  assert.deepEqual(await readdir(join(root, 'meta', 'conv-meta')), [
+    'profile.json',
+  ]);
+  assert.ok(
+    !(await readdir(join(root, 'sessions', 'conv-meta'))).includes(
+      'profile.json'
+    )
+  );
 });

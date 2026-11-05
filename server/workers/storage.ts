@@ -33,11 +33,12 @@ function insideDirectory(directory: string, file: string): boolean {
  * of relying on which file is newest. Returns undefined if absent or invalid.
  */
 export async function readCurrentSession(
-  sessionDir: string
+  sessionDir: string,
+  metaDir: string = sessionDir
 ): Promise<string | undefined> {
   try {
     const record = JSON.parse(
-      await readFile(join(sessionDir, CURRENT_FILE), 'utf8')
+      await readFile(join(metaDir, CURRENT_FILE), 'utf8')
     ) as { sessionFile?: unknown };
     const file = record.sessionFile;
     if (typeof file !== 'string' || !insideDirectory(sessionDir, file)) {
@@ -52,12 +53,14 @@ export async function readCurrentSession(
 
 export async function writeCurrentSession(
   sessionDir: string,
-  sessionFile: string
+  sessionFile: string,
+  metaDir: string = sessionDir
 ): Promise<void> {
   if (!insideDirectory(sessionDir, sessionFile)) {
     throw new Error('Session file is outside the conversation directory');
   }
-  const target = join(sessionDir, CURRENT_FILE);
+  await mkdir(metaDir, { recursive: true, mode: 0o700 });
+  const target = join(metaDir, CURRENT_FILE);
   const temp = `${target}.${process.pid}.tmp`;
   await writeFile(temp, JSON.stringify({ sessionFile }), { mode: 0o600 });
   await rename(temp, target);

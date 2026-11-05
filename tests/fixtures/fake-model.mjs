@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 
 export async function startFakeModel(
   script = [],
-  { fallback, port: listenPort = 0 } = {}
+  { fallback, port: listenPort = 0, host = '127.0.0.1' } = {}
 ) {
   const queue = [...script];
   const requests = [];
@@ -66,9 +66,7 @@ export async function startFakeModel(
       res.end('data: [DONE]\n\n');
     });
   });
-  await new Promise((resolve) =>
-    server.listen(listenPort, '127.0.0.1', resolve)
-  );
+  await new Promise((resolve) => server.listen(listenPort, host, resolve));
   const { port } = server.address();
   return {
     url: `http://127.0.0.1:${port}/v1`,

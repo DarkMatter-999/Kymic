@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { chown, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { RpcClient } from '../gateway/rpc.js';
 import {
@@ -15,6 +15,12 @@ export interface LauncherConfig {
   piCli: string;
   workspaceRoot: string;
   sessionRoot: string;
+  /**
+   * Gateway-private records (current session, profile). Required when `uid` is set:
+   * it must not be writable by the worker, because the gateway writes there as a
+   * more privileged user and must never follow links the worker planted.
+   */
+  metaRoot?: string;
   /** Pi's HOME / PI_CODING_AGENT_DIR (credentials, settings). */
   agentHome: string;
   /** Allowlisted skill files or directories. */
@@ -22,6 +28,11 @@ export interface LauncherConfig {
   /** Dedicated unprivileged identity; requires the gateway to start as root (or CAP_SETUID/SETGID). */
   uid?: number;
   gid?: number;
+  /**
+   * Extra environment for workers, set by the operator (for example proxy settings).
+   * The fixed variables below always win, so this cannot change PATH, HOME or Pi's directory.
+   */
+  env?: Record<string, string>;
   /** Allowlisted Pi extensions (builtin:<name> or a trusted path). */
   extensions?: string[];
   /** Pi --tools selection; defaults to adding codemode. Ignored when `profiles` is set. */
@@ -88,6 +99,7 @@ export class WorkerLauncher {
       piCli: resolve(config.piCli),
       workspaceRoot: resolve(config.workspaceRoot),
       sessionRoot: resolve(config.sessionRoot),
+      metaRoot: config.metaRoot ? resolve(config.metaRoot) : undefined,
       agentHome: resolve(config.agentHome),
       skills: config.skills.map((skill) => resolve(skill)),
       extensions: config.extensions?.map((e) =>
@@ -115,6 +127,20 @@ export class WorkerLauncher {
       config.defaultProfile ?? Object.keys(this.profiles)[0];
     if (!this.profiles[this.defaultProfile])
       throw new Error('Unknown default profile');
+    if (
+      (config.uid !== undefined || config.gid !== undefined) &&
+      !(config.metaRoot && config.uid !== undefined && config.gid !== undefined)
+    )
+      throw new Error(
+        'Dropping privileges needs uid, gid and a gateway-private metaRoot'
+      );
+  }
+
+  private metaDir(conversationId: string): string {
+    return join(
+      this.config.metaRoot ?? this.config.sessionRoot,
+      conversationId
+    );
   }
 
   /** What the browser may choose from. Never includes paths or arguments. */
@@ -128,9 +154,7 @@ export class WorkerLauncher {
 
   /** The profile a conversation uses: its recorded one, else the one a worker is running. */
   async profileOf(conversationId: string): Promise<string | null> {
-    return (
-      (await readProfile(join(this.config.sessionRoot, conversationId))) ?? null
-    );
+    return (await readProfile(this.metaDir(conversationId))) ?? null;
   }
 
   /**
@@ -141,9 +165,9 @@ export class WorkerLauncher {
   async start(conversationId: string, requested?: string): Promise<Worker> {
     if (requested !== undefined && !this.profiles[requested])
       throw new Error('Unknown profile');
-    const recorded = await readProfile(
-      join(this.config.sessionRoot, conversationId)
-    ).catch(() => undefined);
+    const recorded = await readProfile(this.metaDir(conversationId)).catch(
+      () => undefined
+    );
     if (recorded && !this.profiles[recorded])
       throw new Error(`Profile "${recorded}" is no longer configured`);
     if (recorded && requested && requested !== recorded)
@@ -173,7 +197,7 @@ export class WorkerLauncher {
   async commitProfile(conversationId: string): Promise<void> {
     const name = this.running.get(conversationId);
     if (!name) throw new Error('Agent process is not running');
-    const dir = join(this.config.sessionRoot, conversationId);
+    const dir = this.metaDir(conversationId);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeProfileOnce(dir, name);
   }
@@ -188,7 +212,8 @@ export class WorkerLauncher {
     if (!state.sessionFile) throw new Error('Pi did not report a session file');
     await writeCurrentSession(
       join(this.config.sessionRoot, conversationId),
-      state.sessionFile
+      state.sessionFile,
+      this.metaDir(conversationId)
     );
   }
 
@@ -227,7 +252,11 @@ export class WorkerLauncher {
   ): Promise<Worker> {
     const { config } = this;
     const profile = this.profiles[profileName];
-    await mkdir(config.workspaceRoot, { recursive: true, mode: 0o700 });
+    // With a worker identity the parents must be traversable but not writable by it, so
+    // the worker can never swap a directory under the gateway (which runs as root).
+    const rootMode = config.uid === undefined ? 0o700 : 0o711;
+    await mkdir(config.workspaceRoot, { recursive: true, mode: rootMode });
+    await mkdir(config.sessionRoot, { recursive: true, mode: rootMode });
     const workspace = await workspaceForConversation(
       config.workspaceRoot,
       conversationId
@@ -235,9 +264,17 @@ export class WorkerLauncher {
     const sessionDir = join(config.sessionRoot, conversationId);
     await mkdir(sessionDir, { recursive: true, mode: 0o700 });
     await mkdir(config.agentHome, { recursive: true, mode: 0o700 });
+    await mkdir(this.metaDir(conversationId), { recursive: true, mode: 0o700 });
+    if (config.uid !== undefined && config.gid !== undefined) {
+      for (const dir of [workspace, sessionDir, config.agentHome])
+        await chown(dir, config.uid, config.gid);
+    }
 
     // An explicit mapping wins over "newest file": forks create extra session files.
-    const current = await readCurrentSession(sessionDir);
+    const current = await readCurrentSession(
+      sessionDir,
+      this.metaDir(conversationId)
+    );
     const args = [
       config.piCli,
       '--mode',
@@ -260,6 +297,7 @@ export class WorkerLauncher {
     const child = spawn(process.execPath, args, {
       cwd: workspace,
       env: {
+        ...config.env,
         PATH: '/usr/local/bin:/usr/bin:/bin',
         HOME: config.agentHome,
         PI_CODING_AGENT_DIR: config.agentHome,

@@ -1,24 +1,52 @@
-# Build frontend assets
-FROM node:20-alpine AS frontend-builder
+# Production image: one app container running the gateway (which also serves the
+# built frontend) and one Pi worker process per conversation, each as an
+# unprivileged user. Build: docker build -f Dockerfile.prod -t code-mode-agents .
+
+# --- build: frontend assets and the compiled gateway ---------------------------
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm run build && npm run build:server
 
-# Setup frontend with nginx
-FROM nginx:alpine AS frontend
-COPY --from=frontend-builder /app/dist /usr/share/nginx/html
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-
-# Build backend
-FROM node:20-alpine AS backend
+# --- deps: production dependencies only (no dev tools, no install scripts) -----
+FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
+RUN npm ci --omit=dev --ignore-scripts
+
+# --- runtime ---------------------------------------------------------------------
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000 \
+    PI_GATEWAY=1 \
+    STATIC_DIR=/app/dist \
+    PI_DATA_DIR=/data/gateway \
+    PI_META_DIR=/data/gateway/meta \
+    PI_WORKSPACE_DIR=/data/agent/workspaces \
+    PI_SESSION_DIR=/data/agent/sessions \
+    PI_AGENT_HOME=/data/agent/home \
+    PI_AGENT_UID=10001 \
+    PI_AGENT_GID=10001
+RUN groupadd --gid 10001 agent \
+ && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /data/agent/home \
+            --shell /usr/sbin/nologin agent
+WORKDIR /app
+# Code is root-owned and read-only to the worker: it can run extensions and the
+# Pi CLI but not change them.
+COPY --from=deps  --chown=root:root /app/node_modules ./node_modules
+COPY --from=build --chown=root:root /app/dist ./dist
+COPY --from=build --chown=root:root /app/dist-server ./dist-server
+COPY --chown=root:root package.json ./
+COPY --chown=root:root extensions ./extensions
+COPY --chown=root:root skills ./skills
+COPY --chown=root:root docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod -R go-w /app && chmod 755 /usr/local/bin/entrypoint.sh
+VOLUME /data
 EXPOSE 3000
-ENV NODE_ENV=production
-CMD ["node", "--import", "tsx", "server/index.ts"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["node", "dist-server/index.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

@@ -25,6 +25,25 @@ https://github.com/user-attachments/assets/c0e68e8a-7434-4fb0-8120-629b1261b604
   - Cloudflare Code Mode (`@cloudflare/codemode`)
   - Model Context Protocol (`@modelcontextprotocol/sdk`)
 
+## Deploying the Pi gateway (Docker)
+
+One app container runs the gateway, which serves the UI and starts one Pi process per conversation as an unprivileged `agent` user. An allowlist proxy is the only way out to the internet, and nginx is the only published port.
+
+```bash
+GATEWAY_PASSWORD='at least 12 characters' PUBLIC_ORIGIN=http://127.0.0.1:8080 \
+  docker compose -f docker-compose.prod.yml up -d --build
+# open http://127.0.0.1:8080, sign in, then add a model provider under Settings
+```
+
+- `PUBLIC_ORIGIN` must be the exact origin you type in the browser; the gateway rejects every other `Origin`.
+- **Remote access needs TLS.** Put a certificate and key in `certs/tls.crt` and `certs/tls.key`, then set `NGINX_CONF=nginx.tls.conf COOKIE_SECURE=1 PUBLIC_ORIGIN=https://your.host BIND_ADDRESS=0.0.0.0 HTTP_PORT=80 HTTPS_PORT=443`. Without TLS keep the default loopback binding.
+- `EGRESS_ALLOW` is the list of hosts workers and sign-in may reach. The default covers common model providers and is a starting point: add the hosts for the providers you use, or sign-in and model calls will be refused (check `docker compose logs egress`).
+- Sign-in through the browser: OAuth flows that redirect to `localhost` on the server cannot complete from another machine; use the device-code or paste-the-URL option when offered.
+- Health: `GET /health` (process up) and `GET /health/ready` (Pi CLI, worker files and data directory usable). Neither requires login or reveals details.
+- Known limit: the agent's shell runs as the `agent` user and can read that user's Pi configuration, including provider credentials saved by sign-in. The egress allowlist limits where they could be sent, but treat the agent as able to see them.
+
+Opt-in checks against the real image: `DOCKER_TESTS=1 node --import tsx --test tests/docker-acceptance.test.mjs` (add `ACCEPTANCE_TLS=1` for the TLS edge).
+
 ## Getting Started
 
 ### Prerequisites

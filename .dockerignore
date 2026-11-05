@@ -37,4 +37,11 @@ __tests__
 *.test.ts
 *.test.tsx
 *.spec.ts
-*.spec.tsx
+*.spec.tsxdist
+dist-server
+docs
+tests
+.pi-data
+*.log
+.husky
+.claude
