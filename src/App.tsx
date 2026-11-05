@@ -10,6 +10,7 @@ import {
   Square,
   Zap,
   Layout,
+  CalendarClock,
 } from 'lucide-react';
 
 import './App.css';
@@ -18,6 +19,7 @@ import { UserMessage } from './components/UserMessage';
 import { AgentMessage } from './components/AgentMessage';
 import { SubagentsSidebar } from './components/SubagentsSidebar';
 import { CanvasSidebar } from './components/CanvasSidebar';
+import { SchedulesSidebar } from './components/SchedulesSidebar';
 
 const CONVERSATION_KEY = 'codemode.conversationId';
 
@@ -52,7 +54,7 @@ function App() {
 
   // Right Panel State
   const [activeRightPanel, setActiveRightPanel] = useState<
-    'subagents' | 'canvas' | null
+    'subagents' | 'canvas' | 'schedules' | null
   >(null);
 
   // Canvas State
@@ -232,6 +234,25 @@ function App() {
             </button>
             <button
               type="button"
+              onClick={() =>
+                setActiveRightPanel((prev) =>
+                  prev === 'schedules' ? null : 'schedules'
+                )
+              }
+              className={`flex items-center justify-center h-9 px-3 rounded-lg hover:bg-zinc-900 transition-colors shrink-0 text-sm font-medium ${
+                activeRightPanel === 'schedules'
+                  ? 'bg-zinc-800 text-teal-400'
+                  : 'text-zinc-400'
+              }`}
+            >
+              <CalendarClock
+                size={16}
+                className={`mr-2 ${activeRightPanel === 'schedules' ? 'text-teal-400' : 'text-zinc-400'}`}
+              />
+              Schedule
+            </button>
+            <button
+              type="button"
               onClick={() => setShowSettings(true)}
               className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
             >
@@ -370,6 +391,13 @@ function App() {
       {activeRightPanel === 'canvas' && (
         <CanvasSidebar
           canvasData={canvasData}
+          onClose={() => setActiveRightPanel(null)}
+        />
+      )}
+
+      {activeRightPanel === 'schedules' && (
+        <SchedulesSidebar
+          conversationId={conversationId}
           onClose={() => setActiveRightPanel(null)}
         />
       )}

@@ -9,7 +9,9 @@ const port = Number(process.env.FAKE_MODEL_PORT ?? 4010);
 const lastUser = (req) => {
   const m = [...req.messages].reverse().find((x) => x.role === 'user');
   const c = m?.content;
-  return typeof c === 'string' ? c : (c ?? []).map((b) => b.text ?? '').join('');
+  return typeof c === 'string'
+    ? c
+    : (c ?? []).map((b) => b.text ?? '').join('');
 };
 const model = await startFakeModel([], {
   port,
@@ -17,6 +19,19 @@ const model = await startFakeModel([], {
 });
 await mkdir(home, { recursive: true });
 await writeFile(resolve(home, 'models.json'), model.modelsJson());
-await writeFile(resolve(home, 'settings.json'), JSON.stringify({ defaultProvider: 'fake', defaultModel: 'fake-1' }));
-await writeFile(resolve(home, 'mcp.json'), JSON.stringify({ mcpServers: { spike: { command: process.execPath, args: [resolve('tests/fixtures/mcp/spike-server.mjs')] } } }));
+await writeFile(
+  resolve(home, 'settings.json'),
+  JSON.stringify({ defaultProvider: 'fake', defaultModel: 'fake-1' })
+);
+await writeFile(
+  resolve(home, 'mcp.json'),
+  JSON.stringify({
+    mcpServers: {
+      spike: {
+        command: process.execPath,
+        args: [resolve('tests/fixtures/mcp/spike-server.mjs')],
+      },
+    },
+  })
+);
 console.log(`fake model on ${model.url}; agent home ${home}`);

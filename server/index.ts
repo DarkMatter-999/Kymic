@@ -14,6 +14,9 @@ import { getModel } from './provider';
 import { getMcpServersConfig } from './mcp-servers-config';
 import { ConversationManager } from './gateway/conversations';
 import { attachGateway } from './gateway/ws';
+import { Scheduler } from './scheduler/scheduler';
+import { createScheduleRouter } from './scheduler/http';
+import { mkdirSync } from 'node:fs';
 
 dotenv.config();
 
@@ -171,16 +174,36 @@ if (process.env.PI_GATEWAY === '1') {
       'Pi gateway enabled but no authentication exists yet: all connections will be denied. Set PI_GATEWAY_INSECURE_DEV=1 for local development only.'
     );
   }
+  const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
+  ).split(',');
   attachGateway(server, {
     manager: gatewayManager,
-    allowedOrigins: (
-      process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
-    ).split(','),
+    allowedOrigins,
     authenticate: () => insecureDev,
     passthrough: true,
   });
-  const shutdown = () =>
+
+  // Scheduled runs live in the gateway, not the browser. Runs left in flight by
+  // a previous process are marked interrupted on startup and never re-run.
+  mkdirSync(dataRoot, { recursive: true });
+  const scheduler = new Scheduler({
+    dbPath: `${dataRoot}/scheduler.db`,
+    executor: gatewayManager,
+  });
+  scheduler.start();
+  app.use(
+    '/api/schedules',
+    createScheduleRouter({
+      scheduler,
+      allowedOrigins,
+      authenticate: () => insecureDev,
+    })
+  );
+  const shutdown = () => {
+    scheduler.close();
     void gatewayManager.stopAll().finally(() => process.exit(0));
+  };
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
 }
