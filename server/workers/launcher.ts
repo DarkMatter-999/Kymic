@@ -18,6 +18,8 @@ export interface LauncherConfig {
   gid?: number;
   extensions?: string[];
   onEvent?: (conversationId: string, event: unknown) => void;
+  /** Called when a worker process exits for any reason, including a deliberate stop. */
+  onExit?: (conversationId: string, info: { code: number | null; signal: string | null; stderr: string }) => void;
 }
 
 export interface Worker {
@@ -59,8 +61,9 @@ export class WorkerLauncher {
     this.workers.delete(conversationId);
     const worker = await pending.catch(() => undefined);
     if (!worker) return;
-    const exited = new Promise<void>(resolve => {
-      if (worker.child.exitCode !== null || worker.child.signalCode !== null) resolve();
+    const exited = new Promise<void>((resolve) => {
+      if (worker.child.exitCode !== null || worker.child.signalCode !== null)
+        resolve();
       else worker.child.once('exit', () => resolve());
     });
     worker.child.stdin?.end();
@@ -72,22 +75,32 @@ export class WorkerLauncher {
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all([...this.workers.keys()].map(id => this.stop(id)));
+    await Promise.all([...this.workers.keys()].map((id) => this.stop(id)));
   }
 
   private async spawnWorker(conversationId: string): Promise<Worker> {
     const { config } = this;
     await mkdir(config.workspaceRoot, { recursive: true, mode: 0o700 });
-    const workspace = await workspaceForConversation(config.workspaceRoot, conversationId);
+    const workspace = await workspaceForConversation(
+      config.workspaceRoot,
+      conversationId
+    );
     const sessionDir = join(config.sessionRoot, conversationId);
     await mkdir(sessionDir, { recursive: true, mode: 0o700 });
     await mkdir(config.agentHome, { recursive: true, mode: 0o700 });
 
     const args = [
-      config.piCli, '--mode', 'rpc', '--session-dir', sessionDir, '--continue',
-      '--no-extensions', '--no-skills', '--no-context-files',
-      ...(config.extensions ?? []).flatMap(e => ['--extension', e]),
-      ...config.skills.flatMap(s => ['--skill', s]),
+      config.piCli,
+      '--mode',
+      'rpc',
+      '--session-dir',
+      sessionDir,
+      '--continue',
+      '--no-extensions',
+      '--no-skills',
+      '--no-context-files',
+      ...(config.extensions ?? []).flatMap((e) => ['--extension', e]),
+      ...config.skills.flatMap((s) => ['--skill', s]),
     ];
     const child = spawn(process.execPath, args, {
       cwd: workspace,
@@ -107,10 +120,17 @@ export class WorkerLauncher {
     child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
       stderr = (stderr + chunk).slice(-STDERR_LIMIT);
     });
-    const rpc = new RpcClient(child.stdin!, child.stdout!, event => config.onEvent?.(conversationId, event));
-    child.on('exit', code => {
-      rpc.close(new Error(`Pi exited (${code})${stderr ? `: ${stderr.slice(-500)}` : ''}`));
-      this.workers.get(conversationId)?.then(w => {
+    const rpc = new RpcClient(child.stdin!, child.stdout!, (event) =>
+      config.onEvent?.(conversationId, event)
+    );
+    child.on('exit', (code, signal) => {
+      rpc.close(
+        new Error(
+          `Pi exited (${code ?? signal})${stderr ? `: ${stderr.slice(-500)}` : ''}`
+        )
+      );
+      config.onExit?.(conversationId, { code, signal, stderr });
+      this.workers.get(conversationId)?.then((w) => {
         if (w.child === child) this.workers.delete(conversationId);
       });
     });

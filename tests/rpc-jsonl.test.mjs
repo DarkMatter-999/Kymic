@@ -9,5 +9,8 @@ test('RPC JSONL decoder handles split UTF-8, CRLF, and Unicode line separators',
   const encoded = Buffer.from('{"text":"é\u2028x"}\r\n{"n":2}\n');
   const accent = encoded.indexOf(Buffer.from('é'));
   assert.deepEqual(decoder.push(encoded.subarray(0, accent + 1)), []);
-  assert.deepEqual(decoder.push(encoded.subarray(accent + 1)), [{ text: 'é\u2028x' }, { n: 2 }]);
+  assert.deepEqual(decoder.push(encoded.subarray(accent + 1)), [
+    { text: 'é\u2028x' },
+    { n: 2 },
+  ]);
 });
