@@ -1,0 +1,40 @@
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { GatewayClient } from './gateway';
+import { initialState, reduce } from './reducer';
+
+export function useGatewayChat(conversationId: string) {
+  const [state, dispatch] = useReducer(reduce, initialState);
+  const [connected, setConnected] = useState(false);
+  const client = useRef<GatewayClient | null>(null);
+
+  useEffect(() => {
+    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const gateway = new GatewayClient({
+      url: `${scheme}://${window.location.host}/gateway`,
+      conversationId,
+      onEvent: dispatch,
+      onConnection: setConnected,
+    });
+    client.current = gateway;
+    gateway.connect();
+    return () => {
+      gateway.close();
+      client.current = null;
+    };
+  }, [conversationId]);
+
+  const sendMessage = useCallback(
+    (text: string) => client.current?.prompt(text) ?? false,
+    []
+  );
+  const stop = useCallback(() => void client.current?.abort(), []);
+
+  return {
+    messages: state.messages,
+    running: state.running,
+    error: state.error,
+    connected,
+    sendMessage,
+    stop,
+  };
+}
