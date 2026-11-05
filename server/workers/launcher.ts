@@ -2,7 +2,11 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { RpcClient } from '../gateway/rpc.js';
-import { workspaceForConversation } from './storage.js';
+import {
+  readCurrentSession,
+  workspaceForConversation,
+  writeCurrentSession,
+} from './storage.js';
 
 export interface LauncherConfig {
   /** Fixed path to the pinned Pi CLI entry point. */
@@ -75,6 +79,20 @@ export class WorkerLauncher {
     return existing;
   }
 
+  /** Remember which session file this conversation resumes (after a fork). */
+  async recordCurrentSession(conversationId: string): Promise<void> {
+    const worker = this.live.get(conversationId);
+    if (!worker) throw new Error('Agent process is not running');
+    const state = (await worker.rpc.command('get_state')) as {
+      sessionFile?: string;
+    };
+    if (!state.sessionFile) throw new Error('Pi did not report a session file');
+    await writeCurrentSession(
+      join(this.config.sessionRoot, conversationId),
+      state.sessionFile
+    );
+  }
+
   /** The running worker, if any; never starts one. */
   peek(conversationId: string): Worker | undefined {
     return this.live.get(conversationId);
@@ -114,13 +132,15 @@ export class WorkerLauncher {
     await mkdir(sessionDir, { recursive: true, mode: 0o700 });
     await mkdir(config.agentHome, { recursive: true, mode: 0o700 });
 
+    // An explicit mapping wins over "newest file": forks create extra session files.
+    const current = await readCurrentSession(sessionDir);
     const args = [
       config.piCli,
       '--mode',
       'rpc',
       '--session-dir',
       sessionDir,
-      '--continue',
+      ...(current ? ['--session', current] : ['--continue']),
       '--no-extensions',
       '--no-skills',
       '--no-context-files',

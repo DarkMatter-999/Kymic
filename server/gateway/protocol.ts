@@ -2,6 +2,7 @@
 export const PROTOCOL_VERSION = 1 as const;
 export const MAX_PROMPT_LENGTH = 100_000;
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+const ENTRY_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 
 export type DialogMethod = 'select' | 'confirm' | 'input' | 'editor';
 export type DialogCloseReason =
@@ -41,6 +42,19 @@ export type ClientCommand =
       dialogId: string;
     } & DialogAnswer)
   | { v: 1; type: 'abort'; conversationId: string }
+  | {
+      v: 1;
+      type: 'edit';
+      conversationId: string;
+      entryId: string;
+      text: string;
+    }
+  | {
+      v: 1;
+      type: 'regenerate';
+      conversationId: string;
+      entryId: string;
+    }
   | { v: 1; type: 'subscribe'; conversationId: string };
 
 export type ServerEvent = { v: 1; conversationId: string } & (
@@ -68,6 +82,8 @@ export type ServerEvent = { v: 1; conversationId: string } & (
       running: boolean;
       messages: unknown[];
       dialogs: DialogRequest[];
+      /** Pi's current leaf entry; changes when the active branch changes. */
+      leafId: string | null;
     }
   | ({ type: 'dialog_request' } & DialogRequest)
   | { type: 'dialog_closed'; dialogId: string; reason: DialogCloseReason }
@@ -131,6 +147,32 @@ export function parseClientCommand(raw: unknown): ClientCommand {
       }
       if (r.cancelled !== true) invalid('cancelled');
       return { ...base, cancelled: true };
+    }
+    case 'edit':
+    case 'regenerate': {
+      if (typeof r.entryId !== 'string' || !ENTRY_ID_PATTERN.test(r.entryId))
+        invalid('entryId');
+      if (r.type === 'regenerate') {
+        return {
+          v: 1,
+          type: 'regenerate',
+          conversationId,
+          entryId: r.entryId,
+        };
+      }
+      if (
+        typeof r.text !== 'string' ||
+        r.text.length === 0 ||
+        r.text.length > MAX_PROMPT_LENGTH
+      )
+        invalid('text');
+      return {
+        v: 1,
+        type: 'edit',
+        conversationId,
+        entryId: r.entryId,
+        text: r.text,
+      };
     }
     case 'abort':
       return { v: 1, type: 'abort', conversationId };

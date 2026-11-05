@@ -1,9 +1,9 @@
 import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
 import { DialogBroker } from './dialogs.js';
+import { activeBranchMessages } from './history.js';
 import {
   PROTOCOL_VERSION,
   projectPiEvent,
-  visibleMessages,
   type DialogAnswer,
   type DialogRequest,
   type ServerEvent,
@@ -70,6 +70,59 @@ export class ConversationManager {
     if (this.running.has(conversationId))
       throw new Error('Conversation is busy');
     this.setRunning(conversationId, true);
+    await this.startTurn(conversationId, worker, text);
+  }
+
+  /**
+   * Edit a past user message, or regenerate its reply (omit `text`): fork Pi's
+   * session from that entry, then prompt on the new branch. Pi writes the fork
+   * to a new session file, so the original branch is never overwritten, and
+   * nothing from the browser is replayed into the worker.
+   */
+  async forkAndPrompt(
+    conversationId: string,
+    entryId: string,
+    text?: string
+  ): Promise<void> {
+    if (this.running.has(conversationId))
+      throw new Error('Conversation is busy');
+    const worker = await this.launcher.start(conversationId);
+    if (this.running.has(conversationId))
+      throw new Error('Conversation is busy');
+    this.setRunning(conversationId, true); // blocks other prompts during the fork
+    let promptText: string;
+    try {
+      const forked = (await worker.rpc.command('fork', { entryId })) as
+        | { text?: string; cancelled?: boolean }
+        | undefined;
+      if (forked?.cancelled)
+        throw new Error('The fork was cancelled by an extension');
+      // Remember the new branch before anything else can go wrong.
+      await this.launcher.recordCurrentSession(conversationId);
+      promptText = text ?? forked?.text ?? '';
+      if (!promptText)
+        throw new Error('There is no text to send for this message');
+      await this.emitSnapshot(conversationId);
+    } catch (error) {
+      this.setRunning(conversationId, false);
+      throw this.withWorkerDetail(error, worker);
+    }
+    await this.startTurn(conversationId, worker, promptText);
+  }
+
+  private async startTurn(
+    conversationId: string,
+    worker: {
+      rpc: {
+        command(
+          type: string,
+          params?: Record<string, unknown>
+        ): Promise<unknown>;
+      };
+      stderrTail(): string;
+    },
+    text: string
+  ): Promise<void> {
     try {
       const result = (await worker.rpc.command('prompt', { message: text })) as
         | { disposition?: string }
@@ -79,13 +132,19 @@ export class ConversationManager {
         this.setRunning(conversationId, false);
     } catch (error) {
       this.setRunning(conversationId, false);
-      // A generic "transport closed" hides why the worker died; include its stderr.
-      const detail = worker.stderrTail().trim().slice(-400);
-      if (detail && error instanceof Error) {
-        throw new Error(`${error.message}: ${detail}`, { cause: error });
-      }
-      throw error;
+      throw this.withWorkerDetail(error, worker);
     }
+  }
+
+  // A generic "transport closed" hides why the worker died; include its stderr.
+  private withWorkerDetail(
+    error: unknown,
+    worker: { stderrTail(): string }
+  ): unknown {
+    const detail = worker.stderrTail().trim().slice(-400);
+    return detail && error instanceof Error
+      ? new Error(`${error.message}: ${detail}`, { cause: error })
+      : error;
   }
 
   /** Answer a pending extension dialog. Throws if it is unknown, stale or invalid. */
@@ -110,16 +169,48 @@ export class ConversationManager {
     running: boolean;
     messages: unknown[];
     dialogs: DialogRequest[];
+    leafId: string | null;
   }> {
     const worker = await this.launcher.start(conversationId);
-    const data = (await worker.rpc.command('get_messages')) as {
-      messages: unknown[];
-    };
     return {
       running: this.running.has(conversationId),
-      messages: visibleMessages(data.messages),
-      dialogs: this.brokers.get(conversationId)?.list() ?? [],
+      ...(await this.readState(conversationId, worker)),
     };
+  }
+
+  /** The active branch with Pi's entry IDs, from the session entries themselves. */
+  private async readState(
+    conversationId: string,
+    worker: { rpc: { command(type: string): Promise<unknown> } }
+  ): Promise<{
+    messages: unknown[];
+    dialogs: DialogRequest[];
+    leafId: string | null;
+  }> {
+    const data = (await worker.rpc.command('get_entries')) as {
+      entries: Parameters<typeof activeBranchMessages>[0];
+      leafId: string | null;
+    };
+    return {
+      messages: activeBranchMessages(data.entries, data.leafId),
+      dialogs: this.brokers.get(conversationId)?.list() ?? [],
+      leafId: data.leafId ?? null,
+    };
+  }
+
+  private async emitSnapshot(
+    conversationId: string,
+    running = this.running.has(conversationId)
+  ): Promise<void> {
+    const worker = this.launcher.peek(conversationId);
+    if (!worker) return;
+    this.emit(conversationId, {
+      v: PROTOCOL_VERSION,
+      conversationId,
+      type: 'snapshot',
+      running,
+      ...(await this.readState(conversationId, worker)),
+    });
   }
 
   stop(conversationId: string): Promise<void> {
@@ -185,9 +276,30 @@ export class ConversationManager {
       return;
     }
     for (const projected of projectPiEvent(conversationId, event)) {
-      this.emit(conversationId, projected);
-      if (projected.type === 'settled') this.setRunning(conversationId, false);
+      if (projected.type === 'settled') {
+        void this.completeTurn(conversationId, projected);
+      } else {
+        this.emit(conversationId, projected);
+      }
     }
+  }
+
+  /**
+   * Pi has settled: publish its authoritative history (this is what gives live
+   * messages their entry IDs and replaces any partial state), then report the
+   * turn as finished.
+   */
+  private async completeTurn(
+    conversationId: string,
+    settled: ServerEvent
+  ): Promise<void> {
+    try {
+      await this.emitSnapshot(conversationId, false);
+    } catch {
+      // The worker may have died; the settled event below still ends the turn.
+    }
+    this.emit(conversationId, settled);
+    this.setRunning(conversationId, false);
   }
 
   private handleExit(

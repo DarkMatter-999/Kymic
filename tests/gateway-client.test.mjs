@@ -136,19 +136,68 @@ test('prompt returns false when disconnected and close stops reconnecting', asyn
 
 test('respondDialog sends exactly the validated shape and reports whether it was sent', async () => {
   const sent = [];
-  const socket = { readyState: 1, send: (d) => sent.push(JSON.parse(d)), close() {}, onopen: null, onmessage: null, onclose: null, onerror: null };
-  const c = new GatewayClient({ url: 'ws://x', conversationId: 'c1', onEvent() {}, createSocket: () => socket });
+  const socket = {
+    readyState: 1,
+    send: (d) => sent.push(JSON.parse(d)),
+    close() {},
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+  };
+  const c = new GatewayClient({
+    url: 'ws://x',
+    conversationId: 'c1',
+    onEvent() {},
+    createSocket: () => socket,
+  });
   c.connect();
   socket.onopen({});
   assert.equal(c.respondDialog('d1', { confirmed: true }), true);
   assert.equal(c.respondDialog('d2', { value: 'hi' }), true);
   assert.equal(c.respondDialog('d3', { cancelled: true }), true);
   assert.deepEqual(sent.slice(1), [
-    { v: 1, conversationId: 'c1', type: 'dialog_response', dialogId: 'd1', confirmed: true },
-    { v: 1, conversationId: 'c1', type: 'dialog_response', dialogId: 'd2', value: 'hi' },
-    { v: 1, conversationId: 'c1', type: 'dialog_response', dialogId: 'd3', cancelled: true },
+    {
+      v: 1,
+      conversationId: 'c1',
+      type: 'dialog_response',
+      dialogId: 'd1',
+      confirmed: true,
+    },
+    {
+      v: 1,
+      conversationId: 'c1',
+      type: 'dialog_response',
+      dialogId: 'd2',
+      value: 'hi',
+    },
+    {
+      v: 1,
+      conversationId: 'c1',
+      type: 'dialog_response',
+      dialogId: 'd3',
+      cancelled: true,
+    },
   ]);
   socket.readyState = 3;
   assert.equal(c.respondDialog('d4', { cancelled: true }), false);
+  c.close();
+});
+
+test('edit and regenerate send only the entry ID (and new text for edit)', async () => {
+  const sent = [];
+  const socket = { readyState: 1, send: (d) => sent.push(JSON.parse(d)), close() {}, onopen: null, onmessage: null, onclose: null, onerror: null };
+  const c = new GatewayClient({ url: 'ws://x', conversationId: 'c1', onEvent() {}, createSocket: () => socket });
+  c.connect();
+  socket.onopen({});
+  assert.equal(c.edit('u1', 'new words'), true);
+  assert.equal(c.regenerate('u1'), true);
+  assert.deepEqual(sent.slice(1), [
+    { v: 1, conversationId: 'c1', type: 'edit', entryId: 'u1', text: 'new words' },
+    { v: 1, conversationId: 'c1', type: 'regenerate', entryId: 'u1' },
+  ]);
+  socket.readyState = 3;
+  assert.equal(c.edit('u1', 'x'), false);
+  assert.equal(c.regenerate('u1'), false);
   c.close();
 });

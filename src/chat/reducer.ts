@@ -26,6 +26,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   parts: ChatPart[];
   draft?: boolean;
+  /** Pi's stable session entry ID; absent until the post-turn snapshot arrives. */
+  entryId?: string;
 }
 
 export interface ChatState {
@@ -56,6 +58,7 @@ type PiMessage = {
   content?: unknown;
   stopReason?: string;
   errorMessage?: string;
+  entryId?: string;
   toolCallId?: string;
   isError?: boolean;
 };
@@ -150,11 +153,17 @@ export function messagesFromPi(piMessages: unknown[]): ChatMessage[] {
         id: `pi-${index}`,
         role: 'user',
         parts: [{ type: 'text', text: textOf(m.content) }],
+        ...(m.entryId && { entryId: m.entryId }),
       });
     } else if (m.role === 'assistant') {
       const parts = assistantParts(m.content);
       if (parts.length)
-        out.push({ id: `pi-${index}`, role: 'assistant', parts });
+        out.push({
+          id: `pi-${index}`,
+          role: 'assistant',
+          parts,
+          ...(m.entryId && { entryId: m.entryId }),
+        });
     } else if (m.role === 'toolResult' && m.toolCallId) {
       applyToolResult(out, m.toolCallId, m, m.isError === true);
     }

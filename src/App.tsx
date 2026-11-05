@@ -51,6 +51,8 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
     error,
     connected,
     stop,
+    editMessage,
+    regenerate,
     dialogs,
     notice,
     unsupported,
@@ -297,8 +299,19 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
             </div>
           )}
 
-          {displayedMessages.map((message) => {
+          {displayedMessages.map((message, messageIndex) => {
             const isUser = message.role === 'user';
+            // Forking needs Pi's real entry ID, so it is offered only once the
+            // post-turn snapshot has supplied one and nothing is running.
+            const canFork = connected && !isLoading;
+            const entryId = message.entryId;
+            let promptEntryId: string | undefined;
+            for (let i = messageIndex - 1; i >= 0; i--) {
+              if (displayedMessages[i].role === 'user') {
+                promptEntryId = displayedMessages[i].entryId;
+                break;
+              }
+            }
 
             if (message.parts.length === 0) return null;
 
@@ -324,9 +337,24 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
 
                 {/* Message Bubble */}
                 {isUser ? (
-                  <UserMessage message={message} />
+                  <UserMessage
+                    message={message}
+                    onEdit={
+                      canFork && entryId
+                        ? (text) => editMessage(entryId, text)
+                        : undefined
+                    }
+                  />
                 ) : (
-                  <AgentMessage message={message} />
+                  <AgentMessage
+                    message={message}
+                    messageIndex={messageIndex}
+                    onRegenerate={
+                      canFork && promptEntryId
+                        ? () => regenerate(promptEntryId)
+                        : undefined
+                    }
+                  />
                 )}
               </div>
             );

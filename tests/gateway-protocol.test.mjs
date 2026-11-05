@@ -212,3 +212,35 @@ test('system and unknown-role messages never reach the browser', () => {
     [{ role: 'user', content: 'hi' }]
   );
 });
+
+test('edit and regenerate commands are parsed strictly', () => {
+  const base = { v: 1, conversationId: 'c1' };
+  assert.deepEqual(
+    parseClientCommand({
+      ...base,
+      type: 'edit',
+      entryId: 'abc123',
+      text: 'new text',
+      evil: 1,
+    }),
+    { ...base, type: 'edit', entryId: 'abc123', text: 'new text' }
+  );
+  assert.deepEqual(
+    parseClientCommand({ ...base, type: 'regenerate', entryId: 'abc123' }),
+    { ...base, type: 'regenerate', entryId: 'abc123' }
+  );
+  for (const bad of [
+    { ...base, type: 'edit', entryId: 'abc', text: '' },
+    { ...base, type: 'edit', entryId: 'abc' },
+    { ...base, type: 'edit', entryId: '../x', text: 'hi' },
+    { ...base, type: 'edit', entryId: '', text: 'hi' },
+    { ...base, type: 'regenerate' },
+    { ...base, type: 'regenerate', entryId: 5 },
+    { ...base, type: 'edit', entryId: 'abc', text: 'x'.repeat(100_001) },
+  ])
+    assert.throws(
+      () => parseClientCommand(bad),
+      /Invalid/,
+      JSON.stringify(bad).slice(0, 60)
+    );
+});

@@ -69,6 +69,16 @@ export class GatewayClient {
     return this.send({ type: 'abort' });
   }
 
+  /** Fork from a user message and send edited text; the original branch is kept. */
+  edit(entryId: string, text: string): boolean {
+    return this.send({ type: 'edit', entryId, text });
+  }
+
+  /** Fork from a user message and re-ask it. */
+  regenerate(entryId: string): boolean {
+    return this.send({ type: 'regenerate', entryId });
+  }
+
   /** Answer an extension dialog; exactly one of value / confirmed / cancelled. */
   respondDialog(
     dialogId: string,

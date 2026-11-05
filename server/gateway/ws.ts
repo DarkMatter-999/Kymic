@@ -111,6 +111,14 @@ function handleConnection(ws: WebSocket, { manager }: GatewayOptions): void {
               ? { confirmed: command.confirmed }
               : { cancelled: true };
         manager.respondDialog(command.conversationId, command.dialogId, answer);
+      } else if (command.type === 'edit') {
+        await manager.forkAndPrompt(
+          command.conversationId,
+          command.entryId,
+          command.text
+        );
+      } else if (command.type === 'regenerate') {
+        await manager.forkAndPrompt(command.conversationId, command.entryId);
       } else if (command.type === 'prompt') {
         await manager.prompt(command.conversationId, command.text);
       } else {

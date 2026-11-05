@@ -233,13 +233,25 @@ test('user content given as text blocks renders as plain text', () => {
   assert.equal(s.messages[0].parts[0].text, 'ab');
 });
 
-const dlg = (id, extra = {}) => ev('dialog_request', { dialogId: id, method: 'confirm', title: 'Proceed?', ...extra });
+const dlg = (id, extra = {}) =>
+  ev('dialog_request', {
+    dialogId: id,
+    method: 'confirm',
+    title: 'Proceed?',
+    ...extra,
+  });
 
 test('dialogs are queued in arrival order and removed when the server closes them', () => {
   let s = run([dlg('a'), dlg('b', { method: 'input' })]);
-  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['a', 'b']);
+  assert.deepEqual(
+    s.dialogs.map((d) => d.dialogId),
+    ['a', 'b']
+  );
   s = reduce(s, ev('dialog_closed', { dialogId: 'a', reason: 'answered' }));
-  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['b']);
+  assert.deepEqual(
+    s.dialogs.map((d) => d.dialogId),
+    ['b']
+  );
   s = reduce(s, ev('dialog_closed', { dialogId: 'ghost', reason: 'timeout' }));
   assert.equal(s.dialogs.length, 1);
 });
@@ -247,18 +259,80 @@ test('dialogs are queued in arrival order and removed when the server closes the
 test('a repeated dialog_request does not duplicate; snapshot replaces the dialog list', () => {
   let s = run([dlg('a'), dlg('a')]);
   assert.equal(s.dialogs.length, 1);
-  s = reduce(s, ev('snapshot', { running: true, messages: [], dialogs: [dlg('z')] .map(({ dialogId, method, title }) => ({ dialogId, method, title })) }));
-  assert.deepEqual(s.dialogs.map((d) => d.dialogId), ['z']);
+  s = reduce(
+    s,
+    ev('snapshot', {
+      running: true,
+      messages: [],
+      dialogs: [dlg('z')].map(({ dialogId, method, title }) => ({
+        dialogId,
+        method,
+        title,
+      })),
+    })
+  );
+  assert.deepEqual(
+    s.dialogs.map((d) => d.dialogId),
+    ['z']
+  );
   s = reduce(s, ev('snapshot', { running: false, messages: [], dialogs: [] }));
   assert.deepEqual(s.dialogs, []);
 });
 
 test('notices and unsupported UI methods are surfaced and dismissible', () => {
-  let s = run([ev('notice', { level: 'warning', message: 'careful' }), ev('ui_unsupported', { method: 'setStatus' }), ev('ui_unsupported', { method: 'setStatus' }), ev('ui_unsupported', { method: 'setWidget' })]);
-  assert.deepEqual({ level: s.notice.level, message: s.notice.message }, { level: 'warning', message: 'careful' });
+  let s = run([
+    ev('notice', { level: 'warning', message: 'careful' }),
+    ev('ui_unsupported', { method: 'setStatus' }),
+    ev('ui_unsupported', { method: 'setStatus' }),
+    ev('ui_unsupported', { method: 'setWidget' }),
+  ]);
+  assert.deepEqual(
+    { level: s.notice.level, message: s.notice.message },
+    { level: 'warning', message: 'careful' }
+  );
   assert.deepEqual(s.unsupported, ['setStatus', 'setWidget']);
   s = reduce(s, { type: 'dismiss_notice' });
   assert.equal(s.notice, null);
   s = reduce(s, { type: 'dismiss_unsupported' });
   assert.deepEqual(s.unsupported, []);
+});
+
+test('entry IDs from the authoritative snapshot reach user and assistant messages', () => {
+  const s = reduce(initialState, ev('snapshot', {
+    running: false, dialogs: [], leafId: 'a1',
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: 'q' }], entryId: 'u1' },
+      { role: 'assistant', content: [{ type: 'text', text: 'a' }], entryId: 'a1', stopReason: 'stop' },
+    ],
+  }));
+  assert.deepEqual(s.messages.map((m) => [m.role, m.entryId]), [['user', 'u1'], ['assistant', 'a1']]);
+});
+
+test('live messages have no entry ID until the post-turn snapshot supplies them', () => {
+  let s = run([
+    ev('message', { message: { role: 'user', content: 'q' } }),
+    ev('message', { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }], stopReason: 'stop' } }),
+  ]);
+  assert.deepEqual(s.messages.map((m) => m.entryId), [undefined, undefined]);
+  s = reduce(s, ev('snapshot', {
+    running: false, dialogs: [], leafId: 'a1',
+    messages: [
+      { role: 'user', content: 'q', entryId: 'u1' },
+      { role: 'assistant', content: [{ type: 'text', text: 'a' }], entryId: 'a1', stopReason: 'stop' },
+    ],
+  }));
+  assert.equal(s.messages.length, 2);
+  assert.deepEqual(s.messages.map((m) => m.entryId), ['u1', 'a1']);
+});
+
+test('a snapshot from another branch replaces the displayed history entirely', () => {
+  const first = reduce(initialState, ev('snapshot', { running: false, dialogs: [], leafId: 'a2', messages: [
+    { role: 'user', content: 'q1', entryId: 'u1' }, { role: 'assistant', content: [{ type: 'text', text: 'a1' }], entryId: 'a1', stopReason: 'stop' },
+    { role: 'user', content: 'q2', entryId: 'u2' }, { role: 'assistant', content: [{ type: 'text', text: 'a2' }], entryId: 'a2', stopReason: 'stop' },
+  ] }));
+  const forked = reduce(first, ev('snapshot', { running: true, dialogs: [], leafId: 'a1', messages: [
+    { role: 'user', content: 'q1', entryId: 'u1' }, { role: 'assistant', content: [{ type: 'text', text: 'a1' }], entryId: 'a1', stopReason: 'stop' },
+  ] }));
+  assert.deepEqual(forked.messages.map((m) => m.entryId), ['u1', 'a1']);
+  assert.equal(forked.running, true);
 });

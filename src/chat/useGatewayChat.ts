@@ -28,6 +28,15 @@ export function useGatewayChat(conversationId: string) {
     []
   );
   const stop = useCallback(() => void client.current?.abort(), []);
+  const editMessage = useCallback(
+    (entryId: string, text: string) =>
+      client.current?.edit(entryId, text) ?? false,
+    []
+  );
+  const regenerate = useCallback(
+    (entryId: string) => client.current?.regenerate(entryId) ?? false,
+    []
+  );
   const respondDialog = useCallback(
     (
       dialogId: string,
@@ -51,6 +60,8 @@ export function useGatewayChat(conversationId: string) {
     connected,
     sendMessage,
     stop,
+    editMessage,
+    regenerate,
     dialogs: state.dialogs,
     notice: state.notice,
     unsupported: state.unsupported,
