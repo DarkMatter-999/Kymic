@@ -4,7 +4,11 @@ import { join, resolve } from 'node:path';
 import { RpcClient } from '../gateway/rpc.js';
 import {
   readCurrentSession,
+  parseModelRef,
+  readModelFile,
   readProfile,
+  type ModelRef,
+  writeModelFile,
   workspaceForConversation,
   writeCurrentSession,
   writeProfileOnce,
@@ -44,6 +48,11 @@ export interface LauncherConfig {
    */
   profiles?: Record<string, ProfileDef>;
   defaultProfile?: string;
+  /**
+   * The model new and restarted workers use when a conversation has not chosen one.
+   * Read at each start, so changing it affects the next worker without a restart.
+   */
+  defaultModel?: () => ModelRef | undefined;
   onEvent?: (conversationId: string, event: unknown) => void;
   /** Called when a worker process exits for any reason, including a deliberate stop. */
   onExit?: (
@@ -141,6 +150,22 @@ export class WorkerLauncher {
       this.config.metaRoot ?? this.config.sessionRoot,
       conversationId
     );
+  }
+
+  /** The model this conversation chose, if any. */
+  async modelOf(conversationId: string): Promise<ModelRef | undefined> {
+    return readModelFile(this.metaDir(conversationId));
+  }
+
+  /** Remember a conversation's model. It applies to the next worker, so callers restart an idle one. */
+  async setModel(conversationId: string, model: ModelRef): Promise<void> {
+    if (!parseModelRef(model)) throw new Error('Invalid model');
+    await writeModelFile(this.metaDir(conversationId), model);
+  }
+
+  /** Conversations with a running Pi process. */
+  liveConversationIds(): string[] {
+    return [...this.live.keys()];
   }
 
   /** What the browser may choose from. Never includes paths or arguments. */
@@ -270,6 +295,11 @@ export class WorkerLauncher {
         await chown(dir, config.uid, config.gid);
     }
 
+    // A conversation's own choice wins over the default; neither means Pi's own default.
+    const model =
+      (await readModelFile(this.metaDir(conversationId))) ??
+      parseModelRef(config.defaultModel?.());
+
     // An explicit mapping wins over "newest file": forks create extra session files.
     const current = await readCurrentSession(
       sessionDir,
@@ -286,6 +316,7 @@ export class WorkerLauncher {
       '--no-skills',
       '--no-context-files',
       // --no-extensions also drops Pi's built-ins, so the allowlisted ones are loaded explicitly.
+      ...(model ? ['--provider', model.provider, '--model', model.id] : []),
       ...profile.extensions.flatMap((e) => ['--extension', e]),
       ...(profile.tools === null
         ? ['--no-tools']

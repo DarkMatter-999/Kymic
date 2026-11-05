@@ -22,6 +22,7 @@ import { UserMessage } from './components/UserMessage';
 import { AgentMessage } from './components/AgentMessage';
 import { SubagentsSidebar } from './components/SubagentsSidebar';
 import { CanvasSidebar } from './components/CanvasSidebar';
+import { ModelPicker } from './components/ModelPicker';
 import { ProfilePicker } from './components/ProfilePicker';
 import { SchedulesSidebar } from './components/SchedulesSidebar';
 
@@ -69,6 +70,8 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
     canvasRevision,
     subagents,
     profile,
+    model,
+    setModel,
   } = useGatewayChat(conversationId);
 
   // Right Panel State
@@ -155,6 +158,16 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ModelPicker
+              compact
+              value={model}
+              disabled={isLoading || !connected}
+              reloadKey={model?.id}
+              onChange={(m) => {
+                if (!setModel(m.provider, m.id))
+                  throw new Error('Not connected');
+              }}
+            />
             <button
               type="button"
               onClick={() =>

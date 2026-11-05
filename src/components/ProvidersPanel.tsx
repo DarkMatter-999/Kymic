@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ExternalLink, KeyRound, LogOut } from 'lucide-react';
+import { modelsApi, type ModelRef } from '../chat/models';
+import { ModelPicker } from './ModelPicker';
 import {
   foldLoginEvents,
   providersApi,
@@ -21,6 +23,7 @@ export function ProvidersPanel() {
   const [events, setEvents] = useState<LoginEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [answer, setAnswer] = useState('');
+  const [defaultModel, setDefaultModel] = useState<ModelRef | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -35,6 +38,17 @@ export function ProvidersPanel() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
+
+  const signedIn = providers
+    .filter((p) => p.configured)
+    .map((p) => p.id)
+    .join(',');
+  useEffect(() => {
+    void modelsApi
+      .list()
+      .then((l) => setDefaultModel(l.default))
+      .catch(() => undefined);
+  }, [signedIn]);
 
   // Resume a login that is still running after a reload.
   useEffect(() => {
@@ -276,6 +290,22 @@ export function ProvidersPanel() {
           </li>
         ))}
       </ul>
+
+      <div className="pt-2 border-t border-zinc-800 space-y-1">
+        <h3 className="text-sm font-semibold text-zinc-100">Default model</h3>
+        <p className="text-xs text-zinc-500">
+          Used by new conversations. Change a running conversation's model from
+          the header.
+        </p>
+        <ModelPicker
+          value={defaultModel}
+          reloadKey={signedIn}
+          onChange={async (m) => {
+            await modelsApi.setDefault(m);
+            setDefaultModel(m);
+          }}
+        />
+      </div>
     </div>
   );
 }

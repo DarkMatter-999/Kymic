@@ -78,6 +78,11 @@ export class GatewayClient {
     return this.send({ type: 'edit', entryId, text });
   }
 
+  /** Switch this conversation to another model (only while idle). */
+  setModel(provider: string, modelId: string): boolean {
+    return this.send({ type: 'set_model', provider, modelId });
+  }
+
   /** Fork from a user message and re-ask it. */
   regenerate(entryId: string): boolean {
     return this.send({ type: 'regenerate', entryId });

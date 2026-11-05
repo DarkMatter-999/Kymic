@@ -52,6 +52,8 @@ export interface ChatState {
   subagents: SubagentView[];
   /** The conversation's recorded tool profile; null until its first prompt. */
   profile: string | null;
+  /** The model the conversation's Pi process is using, or null if unknown. */
+  model: { provider: string; id: string } | null;
   seq: number;
 }
 
@@ -66,6 +68,7 @@ export const initialState: ChatState = {
   canvasRevision: 0,
   subagents: [],
   profile: null,
+  model: null,
   seq: 0,
 };
 
@@ -240,6 +243,7 @@ export function reduce(
         canvas: event.canvas ?? null,
         subagents: event.subagents ?? [],
         profile: event.profile ?? null,
+        model: event.model ?? null,
       };
     case 'subagent': {
       const index = state.subagents.findIndex(

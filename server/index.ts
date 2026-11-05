@@ -8,6 +8,7 @@ import { ConversationManager } from './gateway/conversations';
 import { attachGateway } from './gateway/ws';
 import { Auth } from './gateway/auth';
 import { LoginManager, createLoginRouter } from './gateway/login';
+import { ModelCatalog, createModelRouter } from './gateway/models';
 import { Scheduler } from './scheduler/scheduler';
 import { createScheduleRouter } from './scheduler/http';
 import { readinessFailures } from './health';
@@ -106,6 +107,22 @@ if (auth) {
 }
 
 // --- Pi gateway -----------------------------------------------------------
+// Provider sign-in and model discovery use Pi's own SDK in the gateway process;
+// credentials land in the agent home's auth.json. The catalog is built from the
+// signed-in providers only: the gateway never reads the agent's models.json,
+// because that file is under the agent's control and can name commands to run.
+mkdirSync(agentHome, { recursive: true, mode: 0o700 });
+const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
+const modelRuntime = await ModelRuntime.create({
+  authPath: `${resolve(agentHome)}/auth.json`,
+  modelsPath: null,
+  refreshOnCreate: false,
+});
+// Gateway-private: the default model must not be something a worker can edit.
+const privateDir = resolve(process.env.PI_META_DIR ?? dataRoot, '_settings');
+const modelCatalog = new ModelCatalog(modelRuntime, privateDir);
+await modelCatalog.load();
+
 const gatewayManager = new ConversationManager({
   piCli,
   workspaceRoot: process.env.PI_WORKSPACE_DIR ?? `${dataRoot}/workspaces`,
@@ -123,6 +140,8 @@ const gatewayManager = new ConversationManager({
     : undefined,
   agentHome,
   skills,
+  defaultModel: () => modelCatalog.getDefault(),
+  validateModel: (ref) => modelCatalog.validate(ref),
   // Operator-defined only; a request can name a profile but never supply paths or
   // arguments. PI_EXTENSIONS replaces the profiles with one explicit list.
   ...(process.env.PI_EXTENSIONS
@@ -156,15 +175,12 @@ app.use(
   createScheduleRouter({ scheduler, allowedOrigins, authenticate })
 );
 
-// Provider sign-in through Pi's own SDK; credentials land in the agent home's auth.json.
-mkdirSync(agentHome, { recursive: true, mode: 0o700 });
-const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
-const loginManager = new LoginManager(
-  await ModelRuntime.create({
-    authPath: `${resolve(agentHome)}/auth.json`,
-    modelsPath: null,
-    refreshOnCreate: false,
-  })
+const loginManager = new LoginManager(modelRuntime, {
+  onCredentialsChanged: () => gatewayManager.credentialsChanged(),
+});
+app.use(
+  '/api/pi/models',
+  createModelRouter({ catalog: modelCatalog, allowedOrigins, authenticate })
 );
 app.use(
   '/api/pi',

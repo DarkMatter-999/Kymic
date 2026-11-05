@@ -101,3 +101,51 @@ export async function writeProfileOnce(
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
 }
+
+const MODEL_FILE = 'model.json';
+const MODEL_PROVIDER = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+const MODEL_ID = /^[\w][\w.:/@+-]{0,199}$/;
+
+/** A model chosen by provider and model ID, as Pi names them. */
+export interface ModelRef {
+  provider: string;
+  id: string;
+}
+
+export function parseModelRef(value: unknown): ModelRef | undefined {
+  const v = value as { provider?: unknown; id?: unknown } | null | undefined;
+  if (
+    typeof v?.provider === 'string' &&
+    typeof v.id === 'string' &&
+    MODEL_PROVIDER.test(v.provider) &&
+    MODEL_ID.test(v.id)
+  )
+    return { provider: v.provider, id: v.id };
+  return undefined;
+}
+
+export async function readModelFile(
+  dir: string
+): Promise<ModelRef | undefined> {
+  try {
+    return parseModelRef(
+      JSON.parse(await readFile(join(dir, MODEL_FILE), 'utf8'))
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Replace the stored model atomically. Only the gateway ever writes this directory. */
+export async function writeModelFile(
+  dir: string,
+  model: ModelRef
+): Promise<void> {
+  const ref = parseModelRef(model);
+  if (!ref) throw new Error('Invalid model');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const target = join(dir, MODEL_FILE);
+  const temp = `${target}.${process.pid}.tmp`;
+  await writeFile(temp, JSON.stringify(ref), { mode: 0o600 });
+  await rename(temp, target);
+}

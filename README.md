@@ -87,7 +87,8 @@ Open **Settings → Model providers**. Each provider lists the sign-in methods P
 
 - **From another machine:** an OAuth flow that redirects to `localhost` on the server cannot finish in your browser. Pick the **device code** option when offered, or paste the redirect URL when asked.
 - **Subscription logins (ChatGPT, Claude):** the GUI drives whatever Pi supports for the provider. Whether a particular subscription works in a headless or containerised setup depends on the provider and is not guaranteed by this project; verify it with your own account.
-- New conversations pick up new credentials. A conversation whose Pi process is already running may need to be started again.
+- Signing in or out restarts idle conversations' Pi processes (they resume the same session) so they pick up the change; a conversation that is mid-reply restarts when the reply ends.
+- **Choosing a model.** Settings → **Default model** sets the model for new conversations, and the model selector in the chat header switches the current conversation (while it is idle; history carries over). The lists show the models your signed-in providers offer; the refresh button asks providers that discover models dynamically (for example local servers or aggregators) for their current list. A model you add through your own `models.json` works in Pi but is not listed here, because the gateway never reads that file (the agent controls it and it can name commands to run).
 
 You can also place a Pi `models.json` or `mcp.json` in `PI_AGENT_HOME` to add custom model endpoints or MCP servers.
 

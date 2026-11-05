@@ -34,6 +34,11 @@ export function useGatewayChat(conversationId: string) {
       client.current?.edit(entryId, text) ?? false,
     []
   );
+  const setModel = useCallback(
+    (provider: string, modelId: string) =>
+      client.current?.setModel(provider, modelId) ?? false,
+    []
+  );
   const regenerate = useCallback(
     (entryId: string) => client.current?.regenerate(entryId) ?? false,
     []
@@ -69,6 +74,8 @@ export function useGatewayChat(conversationId: string) {
     canvas: state.canvas,
     subagents: state.subagents,
     profile: state.profile,
+    model: state.model,
+    setModel,
     canvasRevision: state.canvasRevision,
     respondDialog,
     dismissNotice,

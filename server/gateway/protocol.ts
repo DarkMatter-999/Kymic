@@ -1,3 +1,4 @@
+import { parseModelRef } from '../workers/storage.js';
 import { CANVAS_TOOL, parseCanvas, type CanvasPayload } from './canvas.js';
 import {
   SUBAGENT_TOOL,
@@ -69,6 +70,13 @@ export type ClientCommand =
       conversationId: string;
       entryId: string;
     }
+  | {
+      v: 1;
+      type: 'set_model';
+      conversationId: string;
+      provider: string;
+      modelId: string;
+    }
   | { v: 1; type: 'subscribe'; conversationId: string };
 
 export type ServerEvent = { v: 1; conversationId: string } & (
@@ -106,6 +114,8 @@ export type ServerEvent = { v: 1; conversationId: string } & (
       subagents?: SubagentView[];
       /** The conversation's recorded tool profile; null until its first prompt. */
       profile?: string | null;
+      /** The model the conversation's worker is using, as Pi reports it. */
+      model?: { provider: string; id: string } | null;
     }
   | ({ type: 'dialog_request' } & DialogRequest)
   | { type: 'dialog_closed'; dialogId: string; reason: DialogCloseReason }
@@ -206,6 +216,17 @@ export function parseClientCommand(raw: unknown): ClientCommand {
         conversationId,
         entryId: r.entryId,
         text: r.text,
+      };
+    }
+    case 'set_model': {
+      const model = parseModelRef({ provider: r.provider, id: r.modelId });
+      if (!model) invalid('model');
+      return {
+        v: 1,
+        type: 'set_model',
+        conversationId,
+        provider: model.provider,
+        modelId: model.id,
       };
     }
     case 'abort':

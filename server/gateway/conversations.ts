@@ -1,5 +1,6 @@
 import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
 import { DialogBroker } from './dialogs.js';
+import type { ModelRef } from '../workers/storage.js';
 import { latestCanvas, type CanvasPayload } from './canvas.js';
 import { activeBranchMessages } from './history.js';
 import {
@@ -31,6 +32,9 @@ export class ConversationManager {
   private readonly brokers = new Map<string, DialogBroker>();
   /** Subagents seen live this turn, by conversation then tool call ID. */
   private readonly liveSubagents = new Map<string, Map<string, SubagentView>>();
+  /** Workers to restart once their current turn ends (credentials changed meanwhile). */
+  private readonly restartAfterTurn = new Set<string>();
+  private readonly validateModel?: (ref: unknown) => Promise<ModelRef>;
   private readonly dialogTimeoutMs: number;
   private readonly disconnectGraceMs: number;
 
@@ -40,9 +44,17 @@ export class ConversationManager {
       dialogTimeoutMs?: number;
       /** Cancel pending dialogs after this long with no client connected. */
       disconnectGraceMs?: number;
+      /** Accepts only models the signed-in providers offer; required to change a conversation's model. */
+      validateModel?: (ref: unknown) => Promise<ModelRef>;
     }
   ) {
-    const { dialogTimeoutMs, disconnectGraceMs, ...launcherConfig } = config;
+    const {
+      dialogTimeoutMs,
+      disconnectGraceMs,
+      validateModel,
+      ...launcherConfig
+    } = config;
+    this.validateModel = validateModel;
     this.dialogTimeoutMs = dialogTimeoutMs ?? 5 * 60_000;
     this.disconnectGraceMs = disconnectGraceMs ?? 30_000;
     this.launcher = new WorkerLauncher({
@@ -214,6 +226,7 @@ export class ConversationManager {
     canvas: CanvasPayload | null;
     subagents: SubagentView[];
     profile: string | null;
+    model: ModelRef | null;
   }> {
     const data = (await worker.rpc.command('get_entries')) as {
       entries: Parameters<typeof activeBranchMessages>[0];
@@ -229,7 +242,59 @@ export class ConversationManager {
         ...(this.liveSubagents.get(conversationId)?.values() ?? []),
       ]),
       profile: await this.launcher.profileOf(conversationId),
+      model: await this.currentModel(worker),
     };
+  }
+
+  /** The model the running worker actually uses, as Pi reports it. */
+  private async currentModel(worker: {
+    rpc: { command(type: string): Promise<unknown> };
+  }): Promise<ModelRef | null> {
+    try {
+      const state = (await worker.rpc.command('get_state')) as {
+        model?: { provider?: string; id?: string };
+      };
+      return state.model?.provider && state.model.id
+        ? { provider: state.model.provider, id: state.model.id }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Switch a conversation to another model. The choice is stored by the gateway
+   * and applied by restarting the idle worker, which resumes the same session.
+   */
+  async setModel(conversationId: string, ref: unknown): Promise<void> {
+    if (this.running.has(conversationId))
+      throw new Error(
+        'Wait for the current reply to finish before changing the model'
+      );
+    if (!this.validateModel)
+      throw new Error('Choosing a model is not available');
+    const model = await this.validateModel(ref);
+    this.setRunning(conversationId, true); // blocks prompts during the swap
+    try {
+      await this.launcher.setModel(conversationId, model);
+      await this.launcher.stop(conversationId);
+      await this.launcher.start(conversationId);
+    } finally {
+      this.setRunning(conversationId, false);
+    }
+    await this.emitSnapshot(conversationId);
+  }
+
+  /**
+   * Pi reads credentials only when it starts, so workers started before a
+   * sign-in or sign-out would keep using the old state. Idle ones restart now
+   * (they resume the same session); busy ones restart when their turn ends.
+   */
+  async credentialsChanged(): Promise<void> {
+    for (const id of this.launcher.liveConversationIds()) {
+      if (this.running.has(id)) this.restartAfterTurn.add(id);
+      else await this.launcher.stop(id);
+    }
   }
 
   private async emitSnapshot(
@@ -373,6 +438,8 @@ export class ConversationManager {
     }
     this.emit(conversationId, settled);
     this.setRunning(conversationId, false);
+    if (this.restartAfterTurn.delete(conversationId))
+      await this.launcher.stop(conversationId);
   }
 
   private handleExit(

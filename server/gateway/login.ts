@@ -119,11 +119,18 @@ export class LoginManager {
   private readonly runtime: LoginRuntime;
   private readonly promptTimeoutMs: number;
 
+  private readonly onCredentialsChanged?: () => void | Promise<void>;
+
   constructor(
     runtime: LoginRuntime,
-    options: { promptTimeoutMs?: number } = {}
+    options: {
+      promptTimeoutMs?: number;
+      /** Called after a sign-in completes or a provider is signed out. */
+      onCredentialsChanged?: () => void | Promise<void>;
+    } = {}
   ) {
     this.runtime = runtime;
+    this.onCredentialsChanged = options.onCredentialsChanged;
     this.promptTimeoutMs = options.promptTimeoutMs ?? 10 * 60_000;
   }
 
@@ -187,7 +194,10 @@ export class LoginManager {
     };
     this.runtime
       .login(providerId, authType, interaction)
-      .then(() => this.finish(session, 'done', { type: 'done' }))
+      .then(() => {
+        this.finish(session, 'done', { type: 'done' });
+        this.notifyCredentialsChanged();
+      })
       .catch((error: unknown) => {
         if (session.status !== 'running') return;
         if (session.abort.signal.aborted)
@@ -247,6 +257,17 @@ export class LoginManager {
     if (!(await this.providers()).some((p) => p.id === providerId))
       throw new Error('Unknown provider');
     await this.runtime.logout(providerId);
+    this.notifyCredentialsChanged();
+  }
+
+  private notifyCredentialsChanged(): void {
+    // Best effort: a failed restart must not turn a successful sign-in into a failure.
+    void Promise.resolve(this.onCredentialsChanged?.()).catch((error) =>
+      console.error(
+        'Restarting workers after a credential change failed:',
+        error
+      )
+    );
   }
 
   /** Replays everything so far, then streams. Returns an unsubscribe function. */
