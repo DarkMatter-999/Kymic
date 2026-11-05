@@ -24,7 +24,8 @@ export function useGatewayChat(conversationId: string) {
   }, [conversationId]);
 
   const sendMessage = useCallback(
-    (text: string) => client.current?.prompt(text) ?? false,
+    (text: string, profile?: string) =>
+      client.current?.prompt(text, profile) ?? false,
     []
   );
   const stop = useCallback(() => void client.current?.abort(), []);
@@ -65,6 +66,10 @@ export function useGatewayChat(conversationId: string) {
     dialogs: state.dialogs,
     notice: state.notice,
     unsupported: state.unsupported,
+    canvas: state.canvas,
+    subagents: state.subagents,
+    profile: state.profile,
+    canvasRevision: state.canvasRevision,
     respondDialog,
     dismissNotice,
     dismissUnsupported,

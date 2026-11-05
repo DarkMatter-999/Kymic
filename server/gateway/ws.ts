@@ -120,7 +120,11 @@ function handleConnection(ws: WebSocket, { manager }: GatewayOptions): void {
       } else if (command.type === 'regenerate') {
         await manager.forkAndPrompt(command.conversationId, command.entryId);
       } else if (command.type === 'prompt') {
-        await manager.prompt(command.conversationId, command.text);
+        await manager.prompt(
+          command.conversationId,
+          command.text,
+          command.profile
+        );
       } else {
         await manager.abort(command.conversationId);
       }

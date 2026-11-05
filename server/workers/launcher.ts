@@ -4,8 +4,10 @@ import { join, resolve } from 'node:path';
 import { RpcClient } from '../gateway/rpc.js';
 import {
   readCurrentSession,
+  readProfile,
   workspaceForConversation,
   writeCurrentSession,
+  writeProfileOnce,
 } from './storage.js';
 
 export interface LauncherConfig {
@@ -22,14 +24,35 @@ export interface LauncherConfig {
   gid?: number;
   /** Allowlisted Pi extensions (builtin:<name> or a trusted path). */
   extensions?: string[];
-  /** Pi --tools selection; defaults to adding codemode. */
+  /** Pi --tools selection; defaults to adding codemode. Ignored when `profiles` is set. */
   tools?: string;
+  /**
+   * Named tool profiles, defined by the operator only. A conversation picks one
+   * when it first runs; it is recorded and can never change. Without this, one
+   * "default" profile is built from `extensions` and `tools`.
+   */
+  profiles?: Record<string, ProfileDef>;
+  defaultProfile?: string;
   onEvent?: (conversationId: string, event: unknown) => void;
   /** Called when a worker process exits for any reason, including a deliberate stop. */
   onExit?: (
     conversationId: string,
     info: { code: number | null; signal: string | null; stderr: string }
   ) => void;
+}
+
+/**
+ * What a worker may do. Extensions and tools are separate controls: leaving
+ * codemode out removes the `codemode` tool, and leaving builtin:mcp out removes
+ * MCP servers even from codemode. Hiding a declaration is not enough.
+ */
+export interface ProfileDef {
+  label: string;
+  description: string;
+  /** Extensions to load (builtin:<name> or a trusted path). */
+  extensions: string[];
+  /** A --tools value, `null` for --no-tools, or undefined for Pi's default tools. */
+  tools?: string | null;
 }
 
 export interface Worker {
@@ -53,6 +76,10 @@ export class WorkerLauncher {
   private readonly live = new Map<string, Worker>();
 
   private readonly config: LauncherConfig;
+  private readonly profiles: Record<string, ProfileDef>;
+  readonly defaultProfile: string;
+  /** Profile of each running worker. */
+  private readonly running = new Map<string, string>();
 
   constructor(config: LauncherConfig) {
     // Workers run with their workspace as cwd, so every path must be absolute.
@@ -67,16 +94,88 @@ export class WorkerLauncher {
         e.startsWith('builtin:') ? e : resolve(e)
       ),
     };
+    const resolveExt = (e: string) =>
+      e.startsWith('builtin:') ? e : resolve(e);
+    this.profiles = Object.fromEntries(
+      Object.entries(
+        config.profiles ?? {
+          default: {
+            label: 'Default',
+            description: '',
+            extensions: config.extensions ?? DEFAULT_EXTENSIONS,
+            tools: config.tools ?? '+codemode',
+          },
+        }
+      ).map(([name, def]) => [
+        name,
+        { ...def, extensions: def.extensions.map(resolveExt) },
+      ])
+    );
+    this.defaultProfile =
+      config.defaultProfile ?? Object.keys(this.profiles)[0];
+    if (!this.profiles[this.defaultProfile])
+      throw new Error('Unknown default profile');
   }
 
-  start(conversationId: string): Promise<Worker> {
+  /** What the browser may choose from. Never includes paths or arguments. */
+  listProfiles(): { name: string; label: string; description: string }[] {
+    return Object.entries(this.profiles).map(([name, p]) => ({
+      name,
+      label: p.label,
+      description: p.description,
+    }));
+  }
+
+  /** The profile a conversation uses: its recorded one, else the one a worker is running. */
+  async profileOf(conversationId: string): Promise<string | null> {
+    return (
+      (await readProfile(join(this.config.sessionRoot, conversationId))) ?? null
+    );
+  }
+
+  /**
+   * Start (or reuse) the worker. The profile is the recorded one if there is
+   * one; otherwise the requested one, else the default. A conversation that has
+   * not run yet may still change its choice, which restarts its idle worker.
+   */
+  async start(conversationId: string, requested?: string): Promise<Worker> {
+    if (requested !== undefined && !this.profiles[requested])
+      throw new Error('Unknown profile');
+    const recorded = await readProfile(
+      join(this.config.sessionRoot, conversationId)
+    ).catch(() => undefined);
+    if (recorded && !this.profiles[recorded])
+      throw new Error(`Profile "${recorded}" is no longer configured`);
+    if (recorded && requested && requested !== recorded)
+      throw new Error(
+        `This conversation already uses the "${recorded}" profile`
+      );
+    const name = recorded ?? requested ?? this.defaultProfile;
+
     let existing = this.workers.get(conversationId);
+    if (existing && this.running.get(conversationId) !== name) {
+      await this.stop(conversationId);
+      existing = undefined;
+    }
     if (!existing) {
-      existing = this.spawnWorker(conversationId);
+      existing = this.spawnWorker(conversationId, name);
       this.workers.set(conversationId, existing);
-      existing.catch(() => this.workers.delete(conversationId));
+      this.running.set(conversationId, name);
+      existing.catch(() => {
+        this.workers.delete(conversationId);
+        this.running.delete(conversationId);
+      });
     }
     return existing;
+  }
+
+  /** Fix the running worker's profile for good. Call once the conversation really starts. */
+  async commitProfile(conversationId: string): Promise<void> {
+    const name = this.running.get(conversationId);
+    if (!name) throw new Error('Agent process is not running');
+    const dir = join(this.config.sessionRoot, conversationId);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeProfileOnce(dir, name);
   }
 
   /** Remember which session file this conversation resumes (after a fork). */
@@ -102,6 +201,7 @@ export class WorkerLauncher {
     const pending = this.workers.get(conversationId);
     if (!pending) return;
     this.workers.delete(conversationId);
+    this.running.delete(conversationId);
     const worker = await pending.catch(() => undefined);
     if (!worker) return;
     const exited = new Promise<void>((resolve) => {
@@ -121,8 +221,12 @@ export class WorkerLauncher {
     await Promise.all([...this.workers.keys()].map((id) => this.stop(id)));
   }
 
-  private async spawnWorker(conversationId: string): Promise<Worker> {
+  private async spawnWorker(
+    conversationId: string,
+    profileName: string
+  ): Promise<Worker> {
     const { config } = this;
+    const profile = this.profiles[profileName];
     await mkdir(config.workspaceRoot, { recursive: true, mode: 0o700 });
     const workspace = await workspaceForConversation(
       config.workspaceRoot,
@@ -145,11 +249,12 @@ export class WorkerLauncher {
       '--no-skills',
       '--no-context-files',
       // --no-extensions also drops Pi's built-ins, so the allowlisted ones are loaded explicitly.
-      ...(config.extensions ?? DEFAULT_EXTENSIONS).flatMap((e) => [
-        '--extension',
-        e,
-      ]),
-      ...(config.tools ? ['--tools', config.tools] : ['--tools', '+codemode']),
+      ...profile.extensions.flatMap((e) => ['--extension', e]),
+      ...(profile.tools === null
+        ? ['--no-tools']
+        : profile.tools
+          ? ['--tools', profile.tools]
+          : []),
       ...config.skills.flatMap((s) => ['--skill', s]),
     ];
     const child = spawn(process.execPath, args, {
@@ -184,7 +289,10 @@ export class WorkerLauncher {
       }
       config.onExit?.(conversationId, { code, signal, stderr });
       this.workers.get(conversationId)?.then((w) => {
-        if (w.child === child) this.workers.delete(conversationId);
+        if (w.child === child) {
+          this.workers.delete(conversationId);
+          this.running.delete(conversationId);
+        }
       });
     });
     await new Promise<void>((resolve, reject) => {

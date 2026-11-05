@@ -1,3 +1,10 @@
+import { CANVAS_TOOL, parseCanvas, type CanvasPayload } from './canvas.js';
+import {
+  SUBAGENT_TOOL,
+  parseSubagent,
+  type SubagentView,
+} from './subagents.js';
+
 /** Versioned browser protocol. Only {conversationId, text} ever reaches Pi for a prompt. */
 export const PROTOCOL_VERSION = 1 as const;
 export const MAX_PROMPT_LENGTH = 100_000;
@@ -34,7 +41,14 @@ export type DialogAnswer =
 export const MAX_DIALOG_VALUE_LENGTH = 100_000;
 
 export type ClientCommand =
-  | { v: 1; type: 'prompt'; conversationId: string; text: string }
+  | {
+      v: 1;
+      type: 'prompt';
+      conversationId: string;
+      text: string;
+      /** Only honored on a conversation's first prompt; later it must match or be omitted. */
+      profile?: string;
+    }
   | ({
       v: 1;
       type: 'dialog_response';
@@ -77,6 +91,8 @@ export type ServerEvent = { v: 1; conversationId: string } & (
       isError: boolean;
     }
   | { type: 'settled'; aborted: boolean }
+  | { type: 'canvas'; canvas: CanvasPayload }
+  | { type: 'subagent'; subagent: SubagentView }
   | {
       type: 'snapshot';
       running: boolean;
@@ -84,6 +100,12 @@ export type ServerEvent = { v: 1; conversationId: string } & (
       dialogs: DialogRequest[];
       /** Pi's current leaf entry; changes when the active branch changes. */
       leafId: string | null;
+      /** The canvas on the active branch, derived from history; null if none. */
+      canvas?: CanvasPayload | null;
+      /** Subagents on the active branch plus any still running. */
+      subagents?: SubagentView[];
+      /** The conversation's recorded tool profile; null until its first prompt. */
+      profile?: string | null;
     }
   | ({ type: 'dialog_request' } & DialogRequest)
   | { type: 'dialog_closed'; dialogId: string; reason: DialogCloseReason }
@@ -114,7 +136,19 @@ export function parseClientCommand(raw: unknown): ClientCommand {
         r.text.length > MAX_PROMPT_LENGTH
       )
         invalid('text');
-      return { v: 1, type: 'prompt', conversationId, text: r.text };
+      if (
+        r.profile !== undefined &&
+        (typeof r.profile !== 'string' ||
+          !/^[a-z][a-z0-9_-]{0,31}$/.test(r.profile))
+      )
+        invalid('profile');
+      return {
+        v: 1,
+        type: 'prompt',
+        conversationId,
+        text: r.text,
+        ...(r.profile !== undefined ? { profile: r.profile } : {}),
+      };
     case 'dialog_response': {
       if (
         typeof r.dialogId !== 'string' ||
@@ -201,6 +235,63 @@ export function projectPiEvent(
   conversationId: string,
   event: unknown
 ): ServerEvent[] {
+  return [
+    ...projectGeneric(conversationId, event),
+    ...projectSubagent(conversationId, event),
+  ];
+}
+
+/**
+ * Subagent lifecycle comes only from the run_subagent tool, which exists only
+ * when the subagents extension is loaded. The ID is the tool call ID, never
+ * a value from the payload.
+ */
+function projectSubagent(
+  conversationId: string,
+  event: unknown
+): ServerEvent[] {
+  if (!event || typeof event !== 'object') return [];
+  const e = event as Obj;
+  if (e.toolName !== SUBAGENT_TOOL) return [];
+  const base = { v: PROTOCOL_VERSION, conversationId } as const;
+  const id = String(e.toolCallId);
+  if (e.type === 'tool_execution_start')
+    return [
+      {
+        ...base,
+        type: 'subagent',
+        subagent: {
+          id,
+          task: String(
+            (e.args as { task?: unknown } | undefined)?.task ?? ''
+          ).slice(0, 500),
+          state: 'running',
+        },
+      },
+    ];
+  if (e.type === 'tool_execution_update') {
+    const subagent = parseSubagent(
+      (e.partialResult as { details?: unknown } | undefined)?.details,
+      id
+    );
+    return subagent ? [{ ...base, type: 'subagent', subagent }] : [];
+  }
+  if (e.type === 'tool_execution_end') {
+    const subagent = parseSubagent(
+      (e.result as { details?: unknown } | undefined)?.details,
+      id
+    ) ?? {
+      id,
+      task: '',
+      state: 'error' as const,
+      error: 'Subagent ended without a result',
+    };
+    return [{ ...base, type: 'subagent', subagent }];
+  }
+  return [];
+}
+
+function projectGeneric(conversationId: string, event: unknown): ServerEvent[] {
   if (!event || typeof event !== 'object') return [];
   const e = event as Obj;
   const base = { v: PROTOCOL_VERSION, conversationId } as const;
@@ -251,7 +342,13 @@ export function projectPiEvent(
           partialResult: e.partialResult,
         },
       ];
-    case 'tool_execution_end':
+    case 'tool_execution_end': {
+      const canvas =
+        e.toolName === CANVAS_TOOL && e.isError !== true
+          ? parseCanvas(
+              (e.result as { details?: unknown } | undefined)?.details
+            )
+          : null;
       return [
         {
           ...base,
@@ -261,7 +358,9 @@ export function projectPiEvent(
           result: e.result,
           isError: e.isError === true,
         },
+        ...(canvas ? [{ ...base, type: 'canvas' as const, canvas }] : []),
       ];
+    }
     case 'agent_settled':
       return [{ ...base, type: 'settled', aborted: e.aborted === true }];
     case 'extension_error':

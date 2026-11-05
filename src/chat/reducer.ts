@@ -1,4 +1,9 @@
+import type { CanvasPayload } from '../../server/gateway/canvas';
 import type { DialogRequest, ServerEvent } from '../../server/gateway/protocol';
+import {
+  mergeSubagent,
+  type SubagentView,
+} from '../../server/gateway/subagents';
 
 /** Actions that originate in the browser, never on the wire. */
 export type LocalAction =
@@ -39,6 +44,14 @@ export interface ChatState {
   notice: Notice | null;
   /** Extension UI methods this app cannot render, each listed once. */
   unsupported: string[];
+  /** The canvas on the active branch, or null. */
+  canvas: CanvasPayload | null;
+  /** Bumps only when the agent shows a canvas live, so the pane opens then and not on reload. */
+  canvasRevision: number;
+  /** Subagents in the order they started; the server owns their lifecycle. */
+  subagents: SubagentView[];
+  /** The conversation's recorded tool profile; null until its first prompt. */
+  profile: string | null;
   seq: number;
 }
 
@@ -49,6 +62,10 @@ export const initialState: ChatState = {
   dialogs: [],
   notice: null,
   unsupported: [],
+  canvas: null,
+  canvasRevision: 0,
+  subagents: [],
+  profile: null,
   seq: 0,
 };
 
@@ -220,6 +237,26 @@ export function reduce(
         running: event.running,
         error: null,
         dialogs: event.dialogs ?? [],
+        canvas: event.canvas ?? null,
+        subagents: event.subagents ?? [],
+        profile: event.profile ?? null,
+      };
+    case 'subagent': {
+      const index = state.subagents.findIndex(
+        (a) => a.id === event.subagent.id
+      );
+      const merged = mergeSubagent(state.subagents[index], event.subagent);
+      if (!merged) return state;
+      const subagents = [...state.subagents];
+      if (index >= 0) subagents[index] = merged;
+      else subagents.push(merged);
+      return { ...next, subagents };
+    }
+    case 'canvas':
+      return {
+        ...next,
+        canvas: event.canvas,
+        canvasRevision: state.canvasRevision + 1,
       };
     case 'dialog_request': {
       const { v: _v, conversationId: _c, type: _t, ...dialog } = event;

@@ -61,8 +61,12 @@ export class GatewayClient {
     return this.socket?.readyState === OPEN;
   }
 
-  prompt(text: string): boolean {
-    return this.send({ type: 'prompt', text });
+  prompt(text: string, profile?: string): boolean {
+    return this.send({
+      type: 'prompt',
+      text,
+      ...(profile ? { profile } : {}),
+    });
   }
 
   abort(): boolean {

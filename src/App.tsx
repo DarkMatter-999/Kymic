@@ -23,6 +23,7 @@ import { UserMessage } from './components/UserMessage';
 import { AgentMessage } from './components/AgentMessage';
 import { SubagentsSidebar } from './components/SubagentsSidebar';
 import { CanvasSidebar } from './components/CanvasSidebar';
+import { ProfilePicker } from './components/ProfilePicker';
 import { SchedulesSidebar } from './components/SchedulesSidebar';
 
 const CONVERSATION_KEY = 'codemode.conversationId';
@@ -59,74 +60,22 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
     respondDialog,
     dismissNotice,
     dismissUnsupported,
+    canvas,
+    canvasRevision,
+    subagents,
+    profile,
   } = useGatewayChat(conversationId);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [subagents, setSubagents] = useState<Record<string, any>>({});
 
   // Right Panel State
   const [activeRightPanel, setActiveRightPanel] = useState<
     'subagents' | 'canvas' | 'schedules' | null
   >(null);
 
-  // Canvas State
-  const [canvasData, setCanvasData] = useState({ html: '', css: '', js: '' });
-
+  // Open the pane when the agent shows a canvas live (not when history reloads).
   useEffect(() => {
-    const ws = new WebSocket(
-      `ws://${window.location.hostname}:3000?conversationId=${conversationId}`
-    );
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'canvas_update') {
-          setCanvasData(data.content || { html: '', css: '', js: '' });
-          setActiveRightPanel('canvas');
-        } else if (data.type?.startsWith('subagent_')) {
-          setSubagents((prev) => {
-            const current = prev[data.subagentId] || {
-              id: data.subagentId,
-              status: 'started',
-              text: '',
-            };
-
-            let newStatus = current.status;
-            let newText = current.text;
-            let newResult = current.result;
-
-            if (data.type === 'subagent_started') newStatus = 'running';
-            if (data.type === 'subagent_update') newText = data.text;
-            if (data.type === 'subagent_tool_start') newStatus = 'tool_call';
-            if (data.type === 'subagent_finished') {
-              newStatus = 'finished';
-              newResult = data.result;
-            }
-            if (data.type === 'subagent_error') {
-              newStatus = 'error';
-              newResult = data.error;
-            }
-
-            return {
-              ...prev,
-              [data.subagentId]: {
-                ...current,
-                status: newStatus,
-                text: newText,
-                result: newResult,
-                task: data.task || current.task,
-              },
-            };
-          });
-        }
-      } catch (err) {
-        console.error('Failed to parse WS message', err);
-      }
-    };
-
-    return () => ws.close();
-  }, [conversationId]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (canvasRevision > 0) setActiveRightPanel('canvas');
+  }, [canvasRevision]);
 
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -139,10 +88,12 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedMessages]);
 
+  const [chosenProfile, setChosenProfile] = useState<string | undefined>();
+
   const submit = () => {
     const text = input.trim();
     if (!text || isLoading || !connected) return;
-    if (!sendMessage(text)) return;
+    if (!sendMessage(text, profile ? undefined : chosenProfile)) return;
     setInput('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -236,11 +187,11 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
                 className={`mr-2 ${activeRightPanel === 'subagents' ? 'text-teal-400' : 'text-zinc-400'}`}
               />
               Subagents
-              {Object.keys(subagents).length > 0 && (
+              {subagents.length > 0 && (
                 <span
-                  className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${Object.values(subagents).some((agent) => agent.status !== 'finished') ? 'bg-yellow-500/20 text-yellow-500' : 'bg-teal-500/20 text-teal-500 '}`}
+                  className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${subagents.some((a) => a.state === 'running' || a.state === 'tool_call') ? 'bg-yellow-500/20 text-yellow-500' : 'bg-teal-500/20 text-teal-500 '}`}
                 >
-                  {Object.keys(subagents).length}
+                  {subagents.length}
                 </span>
               )}
             </button>
@@ -296,6 +247,12 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
                   Start a conversation below.
                 </p>
               </div>
+              {profile === null && (
+                <ProfilePicker
+                  value={chosenProfile}
+                  onChange={setChosenProfile}
+                />
+              )}
             </div>
           )}
 
@@ -475,7 +432,7 @@ function ChatApp({ onSignOut }: { onSignOut: () => void }) {
 
       {activeRightPanel === 'canvas' && (
         <CanvasSidebar
-          canvasData={canvasData}
+          canvasData={canvas ?? { html: '', css: '', js: '' }}
           onClose={() => setActiveRightPanel(null)}
         />
       )}

@@ -19,6 +19,7 @@ import { LoginManager, createLoginRouter } from './gateway/login';
 import { Scheduler } from './scheduler/scheduler';
 import { createScheduleRouter } from './scheduler/http';
 import { mkdirSync } from 'node:fs';
+import { DEFAULT_PROFILES } from './workers/profiles';
 import { resolve } from 'node:path';
 
 dotenv.config();
@@ -239,17 +240,24 @@ if (gatewayEnabled) {
     skills: (process.env.PI_SKILLS ?? './skills/spike/SKILL.md')
       .split(',')
       .filter(Boolean),
-    // Operator allowlist only; never taken from a request. Unset keeps Pi's built-in
-    // MCP and codemode extensions.
-    extensions: process.env.PI_EXTENSIONS
-      ? process.env.PI_EXTENSIONS.split(',').filter(Boolean)
-      : undefined,
+    // Operator-defined only; a request can name a profile but never supply paths or
+    // arguments. PI_EXTENSIONS replaces the profiles with one explicit list.
+    ...(process.env.PI_EXTENSIONS
+      ? { extensions: process.env.PI_EXTENSIONS.split(',').filter(Boolean) }
+      : { profiles: DEFAULT_PROFILES, defaultProfile: 'full' }),
     uid: process.env.PI_AGENT_UID
       ? Number(process.env.PI_AGENT_UID)
       : undefined,
     gid: process.env.PI_AGENT_GID
       ? Number(process.env.PI_AGENT_GID)
       : undefined,
+  });
+  app.get('/api/pi/profiles', (req, res) => {
+    if (!authenticate(req)) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    res.json(gatewayManager.launcher.listProfiles());
   });
   attachGateway(server, {
     manager: gatewayManager,

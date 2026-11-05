@@ -1,15 +1,9 @@
 import { Zap, X, Loader2 } from 'lucide-react';
 
-interface Subagent {
-  id: string;
-  status: string;
-  task?: string;
-  text?: string;
-  result?: string;
-}
+import type { SubagentView } from '../../server/gateway/subagents';
 
 interface SubagentsSidebarProps {
-  subagents: Record<string, Subagent>;
+  subagents: SubagentView[];
   onClose: () => void;
 }
 
@@ -17,8 +11,8 @@ export function SubagentsSidebar({
   subagents,
   onClose,
 }: SubagentsSidebarProps) {
-  const hasActiveSubagents = Object.values(subagents).some(
-    (agent) => agent.status !== 'finished'
+  const hasActiveSubagents = subagents.some(
+    (agent) => agent.state === 'running' || agent.state === 'tool_call'
   );
 
   return (
@@ -45,20 +39,20 @@ export function SubagentsSidebar({
 
       <div className="flex-1 overflow-y-auto h-full w-full custom-scrollbar relative">
         <div className="p-4 space-y-4">
-          {Object.values(subagents).length === 0 ? (
+          {subagents.length === 0 ? (
             <div className="text-zinc-500 text-sm text-center mt-10">
               No active subagents.
             </div>
           ) : (
-            Object.values(subagents).map((agent) => (
+            subagents.map((agent) => (
               <div
                 key={agent.id}
                 className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg transition-all"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {agent.status === 'running' ||
-                    agent.status === 'tool_call' ? (
+                    {agent.state === 'running' ||
+                    agent.state === 'tool_call' ? (
                       <Loader2
                         size={14}
                         className="text-yellow-500 animate-spin"
@@ -67,9 +61,11 @@ export function SubagentsSidebar({
                       <Zap
                         size={14}
                         className={
-                          agent.status === 'finished'
+                          agent.state === 'finished'
                             ? 'text-teal-500'
-                            : 'text-red-500'
+                            : agent.state === 'cancelled'
+                              ? 'text-zinc-500'
+                              : 'text-red-500'
                         }
                       />
                     )}
@@ -78,7 +74,7 @@ export function SubagentsSidebar({
                     </span>
                   </div>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded bg-zinc-800 text-zinc-400">
-                    {agent.status.replace('_', ' ')}
+                    {agent.state.replace('_', ' ')}
                   </span>
                 </div>
 
@@ -88,13 +84,20 @@ export function SubagentsSidebar({
                   </div>
                 )}
 
-                {agent.status !== 'finished' && agent.text && (
-                  <div className="text-xs text-zinc-500 font-mono truncate bg-zinc-950/50 p-2 rounded border border-zinc-800">
-                    {agent.text}
+                {(agent.state === 'running' || agent.state === 'tool_call') &&
+                  agent.text && (
+                    <div className="text-xs text-zinc-500 font-mono truncate bg-zinc-950/50 p-2 rounded border border-zinc-800">
+                      {agent.text}
+                    </div>
+                  )}
+
+                {agent.error && (
+                  <div className="text-xs text-red-400 bg-zinc-950/50 p-2 rounded border border-zinc-800">
+                    {agent.error}
                   </div>
                 )}
 
-                {agent.status === 'finished' && agent.result && (
+                {agent.state === 'finished' && agent.result && (
                   <div className="mt-2 bg-zinc-950 p-3 rounded-lg text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar border border-zinc-800 shadow-inner">
                     {agent.result}
                   </div>

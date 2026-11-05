@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
+import type { CanvasPayload } from '../../server/gateway/canvas';
+import {
+  buildCanvasDocument,
+  CANVAS_PRINT_MESSAGE,
+  CANVAS_SANDBOX,
+} from '../chat/canvasDocument';
 import { Layout, Printer, Download, Check, Copy, X } from 'lucide-react';
 
-export interface CanvasData {
-  html: string;
-  css: string;
-  js: string;
-}
+export type CanvasData = CanvasPayload;
 
 interface CanvasSidebarProps {
   canvasData: CanvasData;
@@ -16,31 +18,11 @@ export function CanvasSidebar({ canvasData, onClose }: CanvasSidebarProps) {
   const [isCopied, setIsCopied] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const getFullCanvasHtml = () => `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-      ${canvasData.css || ''}
-    </style>
-  </head>
-  <body>
-    ${canvasData.html || ''}
-    <script>
-      try {
-        ${canvasData.js || ''}
-      } catch (err) {
-        console.error('Canvas JS Error:', err);
-      }
-    </script>
-  </body>
-</html>`;
+  const getFullCanvasHtml = () => buildCanvasDocument(canvasData);
 
+  // The frame has an opaque origin, so its window cannot be called directly.
   const handlePrint = () => {
-    if (iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.print();
-    }
+    iframeRef.current?.contentWindow?.postMessage(CANVAS_PRINT_MESSAGE, '*');
   };
 
   const handleDownload = () => {
@@ -116,7 +98,8 @@ export function CanvasSidebar({ canvasData, onClose }: CanvasSidebarProps) {
             ref={iframeRef}
             title="Interactive Canvas"
             className="w-full h-full border-none"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            sandbox={CANVAS_SANDBOX}
+            referrerPolicy="no-referrer"
             srcDoc={getFullCanvasHtml()}
           />
         </div>

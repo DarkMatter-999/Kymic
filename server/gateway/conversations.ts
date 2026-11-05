@@ -1,6 +1,14 @@
 import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
 import { DialogBroker } from './dialogs.js';
+import { latestCanvas, type CanvasPayload } from './canvas.js';
 import { activeBranchMessages } from './history.js';
+import {
+  isTerminal,
+  mergeSubagent,
+  mergeSubagents,
+  subagentsFromHistory,
+  type SubagentView,
+} from './subagents.js';
 import {
   PROTOCOL_VERSION,
   projectPiEvent,
@@ -21,6 +29,8 @@ export class ConversationManager {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly running = new Set<string>();
   private readonly brokers = new Map<string, DialogBroker>();
+  /** Subagents seen live this turn, by conversation then tool call ID. */
+  private readonly liveSubagents = new Map<string, Map<string, SubagentView>>();
   private readonly dialogTimeoutMs: number;
   private readonly disconnectGraceMs: number;
 
@@ -62,14 +72,25 @@ export class ConversationManager {
     return this.running.has(conversationId);
   }
 
-  async prompt(conversationId: string, text: string): Promise<void> {
+  async prompt(
+    conversationId: string,
+    text: string,
+    profile?: string
+  ): Promise<void> {
     if (this.running.has(conversationId))
       throw new Error('Conversation is busy');
-    const worker = await this.launcher.start(conversationId); // validates the ID
+    const worker = await this.launcher.start(conversationId, profile); // validates the ID and profile
     // Re-check: another prompt may have won the race while the worker was starting.
     if (this.running.has(conversationId))
       throw new Error('Conversation is busy');
     this.setRunning(conversationId, true);
+    this.liveSubagents.delete(conversationId);
+    try {
+      await this.launcher.commitProfile(conversationId);
+    } catch (error) {
+      this.setRunning(conversationId, false);
+      throw error;
+    }
     await this.startTurn(conversationId, worker, text);
   }
 
@@ -90,6 +111,7 @@ export class ConversationManager {
     if (this.running.has(conversationId))
       throw new Error('Conversation is busy');
     this.setRunning(conversationId, true); // blocks other prompts during the fork
+    this.liveSubagents.delete(conversationId);
     let promptText: string;
     try {
       const forked = (await worker.rpc.command('fork', { entryId })) as
@@ -170,6 +192,9 @@ export class ConversationManager {
     messages: unknown[];
     dialogs: DialogRequest[];
     leafId: string | null;
+    canvas: CanvasPayload | null;
+    subagents: SubagentView[];
+    profile: string | null;
   }> {
     const worker = await this.launcher.start(conversationId);
     return {
@@ -186,15 +211,24 @@ export class ConversationManager {
     messages: unknown[];
     dialogs: DialogRequest[];
     leafId: string | null;
+    canvas: CanvasPayload | null;
+    subagents: SubagentView[];
+    profile: string | null;
   }> {
     const data = (await worker.rpc.command('get_entries')) as {
       entries: Parameters<typeof activeBranchMessages>[0];
       leafId: string | null;
     };
+    const messages = activeBranchMessages(data.entries, data.leafId);
     return {
-      messages: activeBranchMessages(data.entries, data.leafId),
+      messages,
       dialogs: this.brokers.get(conversationId)?.list() ?? [],
       leafId: data.leafId ?? null,
+      canvas: latestCanvas(messages),
+      subagents: mergeSubagents(subagentsFromHistory(messages), [
+        ...(this.liveSubagents.get(conversationId)?.values() ?? []),
+      ]),
+      profile: await this.launcher.profileOf(conversationId),
     };
   }
 
@@ -278,10 +312,44 @@ export class ConversationManager {
     for (const projected of projectPiEvent(conversationId, event)) {
       if (projected.type === 'settled') {
         void this.completeTurn(conversationId, projected);
+      } else if (projected.type === 'subagent') {
+        this.applySubagent(conversationId, projected.subagent);
       } else {
         this.emit(conversationId, projected);
       }
     }
+  }
+
+  /** Track a subagent and emit it only if it changed; late events cannot reopen a finished one. */
+  private applySubagent(conversationId: string, next: SubagentView): void {
+    let live = this.liveSubagents.get(conversationId);
+    if (!live) this.liveSubagents.set(conversationId, (live = new Map()));
+    const merged = mergeSubagent(live.get(next.id), next);
+    if (!merged) return;
+    live.set(next.id, merged);
+    this.emit(conversationId, {
+      v: PROTOCOL_VERSION,
+      conversationId,
+      type: 'subagent',
+      subagent: merged,
+    });
+  }
+
+  /** Whatever is still running when the turn ends or the worker dies is over. */
+  private closeSubagents(
+    conversationId: string,
+    state: 'cancelled' | 'error',
+    error: string
+  ): void {
+    for (const sub of [
+      ...(this.liveSubagents.get(conversationId)?.values() ?? []),
+    ])
+      if (!isTerminal(sub.state))
+        this.applySubagent(conversationId, {
+          ...sub,
+          state,
+          ...(state === 'error' ? { error } : {}),
+        });
   }
 
   /**
@@ -293,6 +361,11 @@ export class ConversationManager {
     conversationId: string,
     settled: ServerEvent
   ): Promise<void> {
+    this.closeSubagents(
+      conversationId,
+      (settled as { aborted?: boolean }).aborted ? 'cancelled' : 'error',
+      'The turn ended before this subagent returned'
+    );
     try {
       await this.emitSnapshot(conversationId, false);
     } catch {
@@ -308,6 +381,11 @@ export class ConversationManager {
   ): void {
     // Questions asked by a dead process can never be answered.
     this.brokers.get(conversationId)?.workerExited();
+    this.closeSubagents(
+      conversationId,
+      'error',
+      'The agent process exited while this subagent was running'
+    );
     if (!this.running.has(conversationId)) return;
     this.emit(conversationId, {
       v: PROTOCOL_VERSION,
