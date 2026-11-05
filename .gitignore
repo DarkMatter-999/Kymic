@@ -12,7 +12,11 @@ dist
 dist-ssr
 *.local
 .env
-skills
+/skills/*
+!/skills/spike/
+/skills/spike/*
+!/skills/spike/SKILL.md
+/docs/
 
 # Editor directories and files
 .vscode/*
@@ -24,3 +28,4 @@ skills
 *.njsproj
 *.sln
 *.sw?
+.opencode
