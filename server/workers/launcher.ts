@@ -16,10 +16,16 @@ export interface LauncherConfig {
   /** Dedicated unprivileged identity; requires the gateway to start as root (or CAP_SETUID/SETGID). */
   uid?: number;
   gid?: number;
+  /** Allowlisted Pi extensions (builtin:<name> or a trusted path). */
   extensions?: string[];
+  /** Pi --tools selection; defaults to adding codemode. */
+  tools?: string;
   onEvent?: (conversationId: string, event: unknown) => void;
   /** Called when a worker process exits for any reason, including a deliberate stop. */
-  onExit?: (conversationId: string, info: { code: number | null; signal: string | null; stderr: string }) => void;
+  onExit?: (
+    conversationId: string,
+    info: { code: number | null; signal: string | null; stderr: string }
+  ) => void;
 }
 
 export interface Worker {
@@ -30,6 +36,7 @@ export interface Worker {
   stderrTail(): string;
 }
 
+const DEFAULT_EXTENSIONS = ['builtin:mcp', 'builtin:codemode'];
 const STDERR_LIMIT = 16 * 1024;
 
 /**
@@ -99,7 +106,12 @@ export class WorkerLauncher {
       '--no-extensions',
       '--no-skills',
       '--no-context-files',
-      ...(config.extensions ?? []).flatMap((e) => ['--extension', e]),
+      // --no-extensions also drops Pi's built-ins, so the allowlisted ones are loaded explicitly.
+      ...(config.extensions ?? DEFAULT_EXTENSIONS).flatMap((e) => [
+        '--extension',
+        e,
+      ]),
+      ...(config.tools ? ['--tools', config.tools] : ['--tools', '+codemode']),
       ...config.skills.flatMap((s) => ['--skill', s]),
     ];
     const child = spawn(process.execPath, args, {

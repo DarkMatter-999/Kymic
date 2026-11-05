@@ -1,6 +1,6 @@
-import { useChat } from '@ai-sdk/react';
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { useGatewayChat } from './chat/useGatewayChat';
 import {
   Send,
   Bot,
@@ -11,10 +11,6 @@ import {
   Zap,
   Layout,
 } from 'lucide-react';
-import {
-  DefaultChatTransport,
-  lastAssistantMessageIsCompleteWithToolCalls,
-} from 'ai';
 
 import './App.css';
 import { SettingsModal } from './components/SettingsModal';
@@ -23,16 +19,33 @@ import { AgentMessage } from './components/AgentMessage';
 import { SubagentsSidebar } from './components/SubagentsSidebar';
 import { CanvasSidebar } from './components/CanvasSidebar';
 
-function App() {
-  const [conversationId] = useState(() => uuidv4());
+const CONVERSATION_KEY = 'codemode.conversationId';
 
-  const { messages, sendMessage, status, error, stop } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/chat',
-      body: { conversationId },
-    }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-  });
+// One conversation per browser until a conversation list exists; persisting the ID
+// lets a reload reconnect to the same Pi session instead of starting over.
+function loadConversationId(): string {
+  try {
+    const existing = window.localStorage.getItem(CONVERSATION_KEY);
+    if (existing) return existing;
+    const created = uuidv4();
+    window.localStorage.setItem(CONVERSATION_KEY, created);
+    return created;
+  } catch {
+    return uuidv4();
+  }
+}
+
+function App() {
+  const [conversationId] = useState(loadConversationId);
+
+  const {
+    messages,
+    sendMessage,
+    running: isLoading,
+    error,
+    connected,
+    stop,
+  } = useGatewayChat(conversationId);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [subagents, setSubagents] = useState<Record<string, any>>({});
@@ -103,24 +116,20 @@ function App() {
 
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [truncateAt, setTruncateAt] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isLoading = status === 'streaming' || status === 'submitted';
 
-  const displayedMessages =
-    truncateAt !== null ? messages.slice(0, truncateAt + 1) : messages;
+  const displayedMessages = messages;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedMessages]);
 
-  const submit = async () => {
+  const submit = () => {
     const text = input.trim();
-    if (!text || isLoading) return;
-    await sendMessage({ role: 'user', parts: [{ type: 'text', text }] });
+    if (!text || isLoading || !connected) return;
+    if (!sendMessage(text)) return;
     setInput('');
-    setTruncateAt(null);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -139,51 +148,6 @@ function App() {
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  };
-
-  const handleEditMessage = (messageIndex: number, newContent: string) => {
-    const messageToEdit = messages[messageIndex];
-    if (!messageToEdit) return;
-
-    setTruncateAt(null);
-
-    sendMessage({
-      messageId: messageToEdit.id,
-      text: newContent,
-    });
-
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-  };
-
-  const handleRegenerate = async (messageIndex: number) => {
-    const messageToRegenerate = messages[messageIndex];
-    if (!messageToRegenerate || messageToRegenerate.role !== 'assistant')
-      return;
-
-    setTruncateAt(null);
-
-    let lastUserMessageIndex = -1;
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        lastUserMessageIndex = i;
-        break;
-      }
-    }
-
-    if (lastUserMessageIndex === -1) return;
-
-    const lastUserMessage = messages[lastUserMessageIndex];
-    const userText = lastUserMessage.parts
-      .filter((p) => p.type === 'text')
-      .map((p) => p.text || '')
-      .join('');
-
-    await sendMessage({
-      messageId: lastUserMessage.id,
-      text: userText,
-    });
   };
 
   return (
@@ -206,7 +170,11 @@ function App() {
                 CodeMode Agent
               </h1>
               <p className="text-xs text-zinc-500">
-                {isLoading ? (
+                {!connected ? (
+                  <span className="text-zinc-500 animate-pulse">
+                    Reconnecting...
+                  </span>
+                ) : isLoading ? (
                   <span className="text-zinc-400 animate-pulse">
                     Thinking...
                   </span>
@@ -290,7 +258,7 @@ function App() {
             </div>
           )}
 
-          {displayedMessages.map((message, messageIndex) => {
+          {displayedMessages.map((message) => {
             const isUser = message.role === 'user';
 
             if (message.parts.length === 0) return null;
@@ -317,18 +285,9 @@ function App() {
 
                 {/* Message Bubble */}
                 {isUser ? (
-                  <UserMessage
-                    message={message}
-                    onEdit={(newContent) =>
-                      handleEditMessage(messageIndex, newContent)
-                    }
-                  />
+                  <UserMessage message={message} />
                 ) : (
-                  <AgentMessage
-                    message={message}
-                    messageIndex={messageIndex}
-                    onRegenerate={handleRegenerate}
-                  />
+                  <AgentMessage message={message} />
                 )}
               </div>
             );
@@ -344,7 +303,7 @@ function App() {
                 <Loader2 size={16} className="text-zinc-500 animate-spin" />
                 <span className="text-xs text-zinc-500 font-medium">
                   {displayedMessages[displayedMessages.length - 1]?.parts.some(
-                    (p) => p.type.includes('tool-call')
+                    (p) => p.type.startsWith('tool-')
                   )
                     ? 'Running tools...'
                     : 'Thinking...'}
@@ -356,7 +315,7 @@ function App() {
           {/* Error */}
           {error && (
             <div className="max-w-3xl mx-auto px-4 py-3 rounded-xl error-message text-red-400 text-sm">
-              {error.message ?? 'Something went wrong. Please try again.'}
+              {error}
             </div>
           )}
 
@@ -378,7 +337,7 @@ function App() {
             {isLoading ? (
               <button
                 type="button"
-                onClick={() => stop()}
+                onClick={stop}
                 className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-zinc-700 hover:bg-zinc-800 transition-colors"
                 title="Stop generation"
                 key="stop-btn"
@@ -390,7 +349,7 @@ function App() {
                 type="button"
                 onClick={submit}
                 key="send-btn"
-                disabled={isLoading || !input.trim()}
+                disabled={isLoading || !connected || !input.trim()}
                 className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl send-button disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed"
               >
                 <Send size={18} color="currentColor" />

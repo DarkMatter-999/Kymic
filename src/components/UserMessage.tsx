@@ -10,7 +10,7 @@ interface UserMessageProps {
   message: {
     parts: MessagePart[];
   };
-  onEdit: (newContent: string) => void;
+  onEdit?: (newContent: string) => void;
 }
 
 export function UserMessage({ message, onEdit }: UserMessageProps) {
@@ -32,7 +32,7 @@ export function UserMessage({ message, onEdit }: UserMessageProps) {
 
   const handleEditSubmit = () => {
     if (editedContent.trim()) {
-      onEdit(editedContent);
+      onEdit?.(editedContent);
       setIsEditing(false);
     }
   };
@@ -84,13 +84,15 @@ export function UserMessage({ message, onEdit }: UserMessageProps) {
             <Copy size={16} />
           )}
         </button>
-        <button
-          onClick={() => setIsEditing(true)}
-          className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-full transition-all"
-          title="Edit"
-        >
-          <Edit2 size={16} />
-        </button>
+        {onEdit && (
+          <button
+            onClick={() => setIsEditing(true)}
+            className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-full transition-all"
+            title="Edit"
+          >
+            <Edit2 size={16} />
+          </button>
+        )}
       </div>
 
       {/* Main Message Bubble */}

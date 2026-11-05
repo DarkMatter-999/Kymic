@@ -12,6 +12,8 @@ import { localNodeExecutor } from './executor';
 import { McpManager } from './mcp-manager';
 import { getModel } from './provider';
 import { getMcpServersConfig } from './mcp-servers-config';
+import { ConversationManager } from './gateway/conversations';
+import { attachGateway } from './gateway/ws';
 
 dotenv.config();
 
@@ -74,7 +76,8 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // WebSocket Setup
-const wss = new WebSocketServer({ server });
+// Legacy canvas/subagent socket stays on '/'; the Pi gateway owns '/gateway'.
+const wss = new WebSocketServer({ server, path: '/' });
 const wsClients = new Map<string, Set<WebSocket>>();
 
 wss.on('connection', (ws, req) => {
@@ -129,6 +132,47 @@ redisSubscriber.on('pmessage', (_pattern, channel, message) => {
     }
   }
 });
+
+// Pi gateway (spike). Disabled unless PI_GATEWAY=1. There is no real authentication
+// until the auth milestone, so connections are denied unless PI_GATEWAY_INSECURE_DEV=1.
+if (process.env.PI_GATEWAY === '1') {
+  const dataRoot = process.env.PI_DATA_DIR ?? './.pi-data';
+  const gatewayManager = new ConversationManager({
+    piCli:
+      process.env.PI_CLI ??
+      './node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+    workspaceRoot: `${dataRoot}/workspaces`,
+    sessionRoot: `${dataRoot}/sessions`,
+    agentHome: process.env.PI_AGENT_HOME ?? `${dataRoot}/agent-home`,
+    skills: (process.env.PI_SKILLS ?? './skills/spike/SKILL.md')
+      .split(',')
+      .filter(Boolean),
+    uid: process.env.PI_AGENT_UID
+      ? Number(process.env.PI_AGENT_UID)
+      : undefined,
+    gid: process.env.PI_AGENT_GID
+      ? Number(process.env.PI_AGENT_GID)
+      : undefined,
+  });
+  const insecureDev = process.env.PI_GATEWAY_INSECURE_DEV === '1';
+  if (!insecureDev) {
+    console.warn(
+      'Pi gateway enabled but no authentication exists yet: all connections will be denied. Set PI_GATEWAY_INSECURE_DEV=1 for local development only.'
+    );
+  }
+  attachGateway(server, {
+    manager: gatewayManager,
+    allowedOrigins: (
+      process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173'
+    ).split(','),
+    authenticate: () => insecureDev,
+    passthrough: true,
+  });
+  const shutdown = () =>
+    void gatewayManager.stopAll().finally(() => process.exit(0));
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+}
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);

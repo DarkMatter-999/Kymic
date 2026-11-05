@@ -1,5 +1,9 @@
 import { WorkerLauncher, type LauncherConfig } from '../workers/launcher.js';
-import { PROTOCOL_VERSION, projectPiEvent, type ServerEvent } from './protocol.js';
+import {
+  PROTOCOL_VERSION,
+  projectPiEvent,
+  type ServerEvent,
+} from './protocol.js';
 
 export type Listener = (event: ServerEvent) => void;
 
@@ -31,20 +35,29 @@ export class ConversationManager {
     };
   }
 
+  listenerCount(conversationId: string): number {
+    return this.listeners.get(conversationId)?.size ?? 0;
+  }
+
   isRunning(conversationId: string): boolean {
     return this.running.has(conversationId);
   }
 
   async prompt(conversationId: string, text: string): Promise<void> {
-    if (this.running.has(conversationId)) throw new Error('Conversation is busy');
+    if (this.running.has(conversationId))
+      throw new Error('Conversation is busy');
     const worker = await this.launcher.start(conversationId); // validates the ID
     // Re-check: another prompt may have won the race while the worker was starting.
-    if (this.running.has(conversationId)) throw new Error('Conversation is busy');
+    if (this.running.has(conversationId))
+      throw new Error('Conversation is busy');
     this.setRunning(conversationId, true);
     try {
-      const result = (await worker.rpc.command('prompt', { message: text })) as { disposition?: string } | undefined;
+      const result = (await worker.rpc.command('prompt', { message: text })) as
+        | { disposition?: string }
+        | undefined;
       // A "handled" prompt (e.g. an extension command) starts no run, so no agent_settled will follow.
-      if (result?.disposition === 'handled') this.setRunning(conversationId, false);
+      if (result?.disposition === 'handled')
+        this.setRunning(conversationId, false);
     } catch (error) {
       this.setRunning(conversationId, false);
       throw error;
@@ -58,10 +71,17 @@ export class ConversationManager {
   }
 
   /** Authoritative state from Pi itself; starts an idle worker if none is running. */
-  async snapshot(conversationId: string): Promise<{ running: boolean; messages: unknown[] }> {
+  async snapshot(
+    conversationId: string
+  ): Promise<{ running: boolean; messages: unknown[] }> {
     const worker = await this.launcher.start(conversationId);
-    const data = (await worker.rpc.command('get_messages')) as { messages: unknown[] };
-    return { running: this.running.has(conversationId), messages: data.messages };
+    const data = (await worker.rpc.command('get_messages')) as {
+      messages: unknown[];
+    };
+    return {
+      running: this.running.has(conversationId),
+      messages: data.messages,
+    };
   }
 
   stop(conversationId: string): Promise<void> {
@@ -86,7 +106,12 @@ export class ConversationManager {
     if (this.running.has(conversationId) === running) return;
     if (running) this.running.add(conversationId);
     else this.running.delete(conversationId);
-    this.emit(conversationId, { v: PROTOCOL_VERSION, conversationId, type: 'status', running });
+    this.emit(conversationId, {
+      v: PROTOCOL_VERSION,
+      conversationId,
+      type: 'status',
+      running,
+    });
   }
 
   private handlePiEvent(conversationId: string, event: unknown): void {
@@ -96,10 +121,15 @@ export class ConversationManager {
     }
   }
 
-  private handleExit(conversationId: string, info: { code: number | null; signal: string | null }): void {
+  private handleExit(
+    conversationId: string,
+    info: { code: number | null; signal: string | null }
+  ): void {
     if (!this.running.has(conversationId)) return;
     this.emit(conversationId, {
-      v: PROTOCOL_VERSION, conversationId, type: 'error',
+      v: PROTOCOL_VERSION,
+      conversationId,
+      type: 'error',
       message: `Agent process exited unexpectedly (${info.code ?? info.signal})`,
     });
     this.setRunning(conversationId, false);
